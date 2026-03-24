@@ -2,9 +2,9 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
-from datetime import datetime, timedelta
+import os
 
-# --- 1. 앱 설정 및 스타일 (기존 디자인 유지) ---
+# --- 1. 앱 설정 및 스타일 ---
 st.set_page_config(page_title="Leo의 AI 주식 비서", layout="wide")
 
 st.markdown("""
@@ -23,59 +23,84 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 세션 및 데이터 관리 ---
-# 초기 관심종목 설정
-if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = {"삼성전자": "005930", "SK하이닉스": "000660", "현대차": "005380", "애플": "AAPL", "테슬라": "TSLA"}
+# --- 2. 데이터 로드 (CSV 파일 읽기) ---
+@st.cache_data
+def load_stock_list():
+    if os.path.exists('krx_stocks.csv'):
+        df = pd.read_csv('krx_stocks.csv')
+        # 코드를 6자리 문자열로 변환 (005930 등)
+        df['Code'] = df['Code'].astype(str).str.zfill(6)
+        # 검색용 이름 생성: "삼성전자 (005930)"
+        df['Display'] = df['Name'] + " (" + df['Code'] + ")"
+        return df
+    else:
+        # 파일이 없을 경우를 대비한 최소한의 리스트
+        return pd.DataFrame({'Code':['005930'], 'Name':['삼성전자'], 'Market':['KOSPI'], 'Display':['삼성전자 (005930)']})
 
-if 'target_ticker' not in st.session_state:
-    st.session_state.target_ticker = "005930"
+df_krx = load_stock_list()
+
+# 세션 상태 초기화
+if 'watchlist' not in st.session_state:
+    st.session_state.watchlist = ["삼성전자 (005930)", "SK하이닉스 (000660)", "현대차 (005380)"]
+if 'current_selection' not in st.session_state:
+    st.session_state.current_selection = "삼성전자 (005930)"
 
 # --- 3. 사이드바 구성 ---
 with st.sidebar:
-    st.header("⭐ 관심종목")
-    # 버튼 형태로 관심종목 리스트 표시
-    for name, code in st.session_state.watchlist.items():
-        if st.button(f"{name} ({code})", use_container_width=True):
-            st.session_state.target_ticker = code
-            st.rerun()
+    st.header("⭐ 관심종목 리스트")
+    # 1. 관심종목 바로가기
+    selected_watch = st.selectbox("내 관심종목 바로가기", options=st.session_state.watchlist)
     
-    st.divider()
-    st.header("🔍 종목 검색")
-    # 직접 입력창 추가 (KRX 서버 에러 방지용)
-    new_ticker = st.text_input("종목코드 6자리 또는 티커 입력", value=st.session_state.target_ticker)
-    if new_ticker != st.session_state.target_ticker:
-        st.session_state.target_ticker = new_ticker
+    if st.button("🚀 바로 분석", use_container_width=True):
+        st.session_state.current_selection = selected_watch
         st.rerun()
 
     st.divider()
-    st.subheader("💡 분석 옵션")
-    use_ma = st.checkbox("방법 A: 이동평균선", value=True)
-    use_rsi = st.checkbox("방법 B: RSI 심리", value=True)
-    use_vol = st.checkbox("방법 C: 거래량 실세", value=True)
-    use_bb = st.checkbox("방법 D: 볼린저 밴드", value=True)
-    expert_mode = st.toggle("🛠️ 전문가 데이터 보기", value=False)
+    st.header("🔍 전 종목 검색")
+    # 2. 모든 종목 자동완성 검색창
+    all_names = df_krx['Display'].tolist()
+    # 현재 선택된 종목이 리스트에 있으면 해당 인덱스, 없으면 0번
+    try:
+        current_idx = all_names.index(st.session_state.current_selection)
+    except:
+        current_idx = 0
+        
+    search_stock = st.selectbox("회사명 검색", options=all_names, index=current_idx)
+    
+    # 추가/삭제 버튼
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("⭐ 추가"):
+            if search_stock not in st.session_state.watchlist:
+                st.session_state.watchlist.append(search_stock)
+                st.rerun()
+    with col2:
+        if st.button("🗑️ 삭제"):
+            if search_stock in st.session_state.watchlist and len(st.session_state.watchlist) > 1:
+                st.session_state.watchlist.remove(search_stock)
+                st.session_state.current_selection = st.session_state.watchlist[0]
+                st.rerun()
 
-# 티커 정제 (한국 주식 자동 처리)
-raw_ticker = st.session_state.target_ticker.strip()
-if raw_ticker.isdigit() and len(raw_ticker) == 6:
-    ticker = f"{raw_ticker}.KS"  # 기본 KOSPI로 시도
-else:
-    ticker = raw_ticker
+    # 분석용 티커 추출
+    st.session_state.current_selection = search_stock
+    stock_info = df_krx[df_krx['Display'] == search_stock].iloc[0]
+    raw_code = stock_info['Code']
+    ticker = f"{raw_code}.KS" if stock_info['Market'] == 'KOSPI' else f"{raw_code}.KQ"
+    display_name = stock_info['Name']
+
+    st.divider()
+    st.subheader("💡 분석 옵션")
+    use_ma = st.checkbox("이동평균선", value=True)
+    use_rsi = st.checkbox("RSI 심리", value=True)
+    use_vol = st.checkbox("거래량 실세", value=True)
+    use_bb = st.checkbox("볼린저 밴드", value=True)
+    expert_mode = st.toggle("🛠️ 전문가 차트 보기", value=False)
 
 # --- 4. 분석 엔진 ---
-def analyze_stock(symbol, use_ma, use_rsi, use_vol, use_bb):
+def analyze_stock(symbol):
     try:
         df = yf.download(symbol, period="1y", interval="1d", progress=False)
-        
-        # KOSPI에서 못 찾으면 KOSDAQ(.KQ)으로 재시도
-        if df.empty and ".KS" in symbol:
-            symbol = symbol.replace(".KS", ".KQ")
-            df = yf.download(symbol, period="1y", interval="1d", progress=False)
-            
-        if df.empty: return "데이터를 찾을 수 없습니다.", None, None, None
-        
-        # 컬럼 정리
+        if df.empty: return None, None, None, None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         
         # 지표 계산
@@ -91,38 +116,29 @@ def analyze_stock(symbol, use_ma, use_rsi, use_vol, use_bb):
 
         if use_ma:
             ma5, ma20 = float(last['MA5']), float(last['MA20'])
-            opinion = "매수 추천" if ma5 > ma20 else "매도 추천"
-            reason = "5일선이 20일선 위에 있어 상승 추세입니다." if ma5 > ma20 else "하락 추세입니다."
-            results.append(("이동평균선", opinion, reason, 1 if ma5 > ma20 else -1))
-        
+            results.append(("이동평균선", "매수 추천" if ma5 > ma20 else "매도 추천", "단기 상승세입니다." if ma5 > ma20 else "하락 추세입니다.", 1 if ma5 > ma20 else -1))
         if use_rsi:
             rsi_v = float(last['RSI'])
             sc = 2 if rsi_v < 35 else (-2 if rsi_v > 70 else 0)
-            opinion = "강력 매수" if sc==2 else ("강력 매도" if sc==-2 else "관망")
-            results.append(("RSI 심리", opinion, f"RSI가 {rsi_v:.1f}로 {'바닥권' if sc==2 else ('과열권' if sc==-2 else '안정적')}입니다.", sc))
-            
+            results.append(("RSI 심리", "강력 매수" if sc==2 else ("강력 매도" if sc==-2 else "관망"), f"지수 {rsi_v:.1f}", sc))
         if use_vol:
-            vol_ratio = (float(last['Volume']) / float(last['Vol_MA20'])) * 100
-            sc = 2 if vol_ratio > 200 and last['Close'] > prev['Close'] else (-1 if vol_ratio < 50 else 0)
-            results.append(("거래량 실세", "강력 매수" if sc==2 else "관망", f"거래량이 평소 대비 {vol_ratio:.0f}% 수준입니다.", sc))
-            
+            ratio = (float(last['Volume']) / float(last['Vol_MA20'])) * 100
+            sc = 2 if ratio > 200 and last['Close'] > prev['Close'] else (-1 if ratio < 50 else 0)
+            results.append(("거래량 실세", "강력 매수" if sc==2 else "관망", f"평균 대비 {ratio:.0f}%", sc))
         if use_bb:
             p, up, lo = float(last['Close']), float(last['BB_Upper']), float(last['BB_Lower'])
             sc = 2 if p <= lo else (-2 if p >= up else 0)
-            opinion = "강력 매수" if sc==2 else ("강력 매도" if sc==-2 else "관망")
-            results.append(("볼린저 밴드", opinion, f"주가가 밴드 {'하단' if sc==2 else ('상단' if sc==-2 else '내부')}에 위치합니다.", sc))
+            results.append(("볼린저 밴드", "강력 매수" if sc==2 else ("강력 매도" if sc==-2 else "관망"), "밴드 하단 이탈" if sc==2 else "안정적", sc))
 
         avg_score = sum(r[3] for r in results) / len(results) if results else 0
         final = "강력 매수" if avg_score >= 1.2 else ("매수 추천" if avg_score >= 0.4 else ("강력 매도" if avg_score <= -1.2 else ("매도" if avg_score <= -0.4 else "관망")))
-        
-        return None, df, results, final
-    except Exception as e: 
-        return str(e), None, None, None
+        return df, results, final
+    except: return None, None, None
 
 # --- 5. 메인 화면 ---
-st.title(f"🚦 AI 전략 리포트: {raw_ticker}")
+st.title(f"🚦 AI 전략 리포트: {display_name}")
 
-err, df, indicators, final_status = analyze_stock(ticker, use_ma, use_rsi, use_vol, use_bb)
+df, indicators, final_status = analyze_stock(ticker)
 
 if df is not None:
     # 신호등 UI
@@ -131,7 +147,6 @@ if df is not None:
     boxes = "".join([f'<div class="signal-box {cmap[s] if s==final_status else ""}">{s}</div>' for s in signals])
     st.markdown(f'<div class="signal-container">{boxes}</div>', unsafe_allow_html=True)
     
-    # 상세 분석 카드
     st.subheader("📝 상세 분석")
     cols = st.columns(len(indicators))
     for i, (name, opinion, reason, score) in enumerate(indicators):
@@ -139,12 +154,9 @@ if df is not None:
         with cols[i]:
             st.markdown(f'<div class="strategy-card"><span class="indicator-label">{name}</span><span class="indicator-opinion" style="color: {color};">[{opinion}]</span><div class="indicator-reason">{reason}</div></div>', unsafe_allow_html=True)
 
-    # 전문가 모드 차트
     if expert_mode:
         st.divider()
-        st.subheader("📊 기술적 분석 차트")
+        st.subheader("📊 기술적 차트")
         st.line_chart(df[['Close', 'BB_Upper', 'BB_Lower']] if use_bb else df[['Close', 'MA5', 'MA20']])
-        if use_vol: st.bar_chart(df['Volume'])
 else:
-    st.error(f"분석 중 오류: {err}")
-    st.info("💡 팁: 한국 주식은 6자리 숫자(예: 005930)를, 미국 주식은 티커(예: AAPL)를 입력하세요.")
+    st.error("데이터 로딩 실패. 종목 코드를 확인해 주세요.")
