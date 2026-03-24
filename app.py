@@ -4,17 +4,19 @@ import pandas as pd
 import pandas_ta as ta
 import os
 
-# --- 1. 앱 설정 및 아이콘 강제 지정 ---
-# 브라우저 탭 아이콘 설정
+# --- 1. 앱 설정 및 아이콘 강제 주입 ---
 st.set_page_config(page_title="Leo 주식비서", page_icon="icon.png", layout="wide")
 
-# 스마트폰 홈 화면 아이콘 전용 HTML (이 코드가 있어야 스트림릿 로고가 안 뜹니다)
+# 아이콘을 강제로 폰에 인식시키는 메타 태그 (에러 방지용 구조 수정)
 st.markdown("""
     <head>
         <link rel="apple-touch-icon" href="icon.png">
-        <link rel="shortcut icon" href="icon.png">
         <link rel="icon" href="icon.png">
     </head>
+    """, unsafe_allow_html=True)
+
+# CSS 스타일 정의 (에러 없이 깔끔하게 분리)
+st.markdown("""
     <style>
     /* 메인 선택창 스타일 */
     .main-selector { background-color: #f1f3f5; padding: 15px; border-radius: 15px; margin-bottom: 20px; }
@@ -41,7 +43,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 데이터 로드 ---
+# --- 2. 데이터 로드 (이후 로직은 동일) ---
 @st.cache_data
 def load_stock_list():
     if os.path.exists('krx_stocks.csv'):
@@ -58,9 +60,9 @@ if 'watchlist' not in st.session_state:
 if 'current_selection' not in st.session_state:
     st.session_state.current_selection = "삼성전자 (005930)"
 
-# --- 3. 메인 화면 상단 ---
 st.title("🚦 Leo의 AI 주식 비서")
 
+# 관심종목 버튼
 watch_cols = st.columns(len(st.session_state.watchlist))
 for i, stock in enumerate(st.session_state.watchlist):
     if watch_cols[i].button(stock.split(" ")[0], key=f"btn_{i}", use_container_width=True):
@@ -87,7 +89,6 @@ with st.sidebar:
     use_vol = st.checkbox("방법 C: 거래량 실세", value=True)
     use_bb = st.checkbox("방법 D: 볼린저 밴드", value=True)
     expert_mode = st.toggle("🛠️ 전문가 차트 보기", value=False)
-    
     st.divider()
     if st.button("⭐ 현재 종목 관심등록", use_container_width=True):
         if st.session_state.current_selection not in st.session_state.watchlist:
@@ -99,29 +100,25 @@ with st.sidebar:
             st.session_state.current_selection = st.session_state.watchlist[0]
             st.rerun()
 
-# --- 4. 분석 엔진 ---
 def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
     try:
         df = yf.download(symbol, period="1y", interval="1d", progress=False)
         if df.empty: return None, None, None, None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        
         df['MA5'] = ta.sma(df['Close'], length=5)
         df['MA20'] = ta.sma(df['Close'], length=20)
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['Vol_MA20'] = ta.sma(df['Volume'], length=20)
         bb = ta.bbands(df['Close'], length=20, std=2)
         df['BB_Upper'], df['BB_Lower'] = bb.iloc[:, 2], bb.iloc[:, 0]
-        
         last, prev = df.iloc[-1], df.iloc[-2]
         curr_p, prev_p = float(last['Close']), float(prev['Close'])
         delta = curr_p - prev_p
         price_info = {"curr": curr_p, "delta": delta, "percent": (delta/prev_p)*100}
-        
         results = []
         if u_ma:
             m5, m20 = float(last['MA5']), float(last['MA20'])
-            results.append(("이동평균선", "매수 추천" if m5 > m20 else "매도 추천", "상승 추세", 1 if m5 > m20 else -1))
+            results.append(("이동평균선", "매수 추천" if m5 > m20 else "매도 추천", "상승 추세" if m5 > m20 else "하락 추세", 1 if m5 > m20 else -1))
         if u_rsi:
             rv = float(last['RSI'])
             sc = 2 if rv < 35 else (-2 if rv > 70 else 0)
@@ -134,7 +131,6 @@ def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
             p, up, lo = curr_p, float(last['BB_Upper']), float(last['BB_Lower'])
             sc = 2 if p <= lo else (-2 if p >= up else 0)
             results.append(("볼린저밴드", "바닥권" if sc==2 else ("천장권" if sc==-2 else "안정적"), "밴드 하단", sc))
-
         avg = sum(r[3] for r in results) / len(results) if results else 0
         final = "강력 매수" if avg >= 1.2 else ("매수 추천" if avg >= 0.4 else ("강력 매도" if avg <= -1.2 else ("매도" if avg <= -0.4 else "관망")))
         return df, results, final, price_info
@@ -153,12 +149,10 @@ if df is not None:
             </div>
         </div>
         """, unsafe_allow_html=True)
-
     signals = ["강력 매도", "매도", "관망", "매수 추천", "강력 매수"]
     cmap = {"강력 매수":"active-strong-buy", "매수 추천":"active-buy", "관망":"active-hold", "매도":"active-sell", "강력 매도":"active-strong-sell"}
     boxes = "".join([f'<div class="signal-box {cmap[s] if s==final_status else ""}">{s}</div>' for s in signals])
     st.markdown(f'<div class="signal-container">{boxes}</div>', unsafe_allow_html=True)
-    
     for name, opinion, reason, score in indicators:
         c = "#2b8a3e" if "매수" in opinion or "바닥" in opinion else ("#e03131" if "매도" in opinion or "천장" in opinion else "#f08c00")
         st.markdown(f"""
@@ -170,7 +164,6 @@ if df is not None:
                 <div class="indicator-reason">{reason}</div>
             </div>
             """, unsafe_allow_html=True)
-
     if expert_mode:
         with st.expander("📊 기술적 차트", expanded=True):
             st.line_chart(df[['Close', 'MA5', 'MA20']])
