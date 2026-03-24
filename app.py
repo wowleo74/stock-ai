@@ -4,11 +4,9 @@ import pandas as pd
 import pandas_ta as ta
 import os
 
-# --- 1. 아이콘 및 페이지 설정 ---
-# 브라우저 탭 아이콘 설정
+# --- 1. 앱 설정 및 아이콘 강제 주입 ---
 st.set_page_config(page_title="Leo 주식비서", page_icon="icon.png", layout="wide")
 
-# 모바일 홈 화면 아이콘 강제 주입 (wowleo74 계정 전용 고유 주소 사용)
 st.markdown("""
     <head>
         <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/wowleo74/stock-ai/main/icon.png">
@@ -17,18 +15,12 @@ st.markdown("""
     </head>
     """, unsafe_allow_html=True)
 
-# 화면 스타일 정의 (에러가 발생하지 않도록 코드를 정돈했습니다)
 st.markdown("""
     <style>
-    /* 메인 선택창 스타일 */
     .main-selector { background-color: #f1f3f5; padding: 15px; border-radius: 15px; margin-bottom: 20px; }
-    
-    /* 가격 표시 스타일 */
     .price-container { background-color: #ffffff; padding: 15px; border-radius: 15px; text-align: center; margin-bottom: 20px; border: 1px solid #dee2e6; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     .current-price { font-size: 2.2rem; font-weight: bold; color: #212529; margin-bottom: 5px; }
     .price-delta { font-size: 1.1rem; font-weight: 500; }
-    
-    /* 신호등 및 카드 스타일 */
     .signal-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-bottom: 25px; }
     .signal-box { flex: 1 1 100px; padding: 12px 8px; border-radius: 12px; text-align: center; font-weight: bold; color: #adb5bd; background-color: #f8f9fa; border: 1px solid #e9ecef; font-size: 0.9rem; }
     .active-strong-buy { background-color: #2b8a3e !important; color: white !important; border: 2px solid #51cf66 !important; }
@@ -36,16 +28,14 @@ st.markdown("""
     .active-hold { background-color: #f08c00 !important; color: white !important; border: 2px solid #ffc078 !important; }
     .active-sell { background-color: #e03131 !important; color: white !important; border: 2px solid #ff8787 !important; }
     .active-strong-sell { background-color: #c92a2a !important; color: white !important; border: 2px solid #ffa8a8 !important; }
-    
     .strategy-card { padding: 18px; border-radius: 15px; border-left: 6px solid #228be6; background-color: #ffffff; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
     .indicator-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .indicator-label { font-weight: bold; font-size: 1.1rem; color: #343a40; }
-    
     @media (max-width: 600px) { .current-price { font-size: 1.8rem; } }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 데이터 로드 (기존 로직 유지) ---
+# --- 2. 데이터 로드 ---
 @st.cache_data
 def load_stock_list():
     if os.path.exists('krx_stocks.csv'):
@@ -57,33 +47,48 @@ def load_stock_list():
 
 df_krx = load_stock_list()
 
-if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = ["삼성전자 (005930)", "SK하이닉스 (000660)", "현대차 (005380)"]
+# 최근 검색 기록을 위한 세션 초기화
+if 'recent_searches' not in st.session_state:
+    st.session_state.recent_searches = ["삼성전자 (005930)"]
 if 'current_selection' not in st.session_state:
     st.session_state.current_selection = "삼성전자 (005930)"
 
 # --- 3. 메인 화면 상단 ---
 st.title("🚦 Leo의 AI 주식 비서")
 
-watch_cols = st.columns(len(st.session_state.watchlist))
-for i, stock in enumerate(st.session_state.watchlist):
-    if watch_cols[i].button(stock.split(" ")[0], key=f"btn_{i}", use_container_width=True):
+# 최근 검색 종목 버튼 표시
+st.markdown("<div style='font-size: 0.9rem; color: #868e96; margin-bottom: 5px; font-weight: bold;'>🕒 최근 검색</div>", unsafe_allow_html=True)
+recent_cols = st.columns(len(st.session_state.recent_searches))
+for i, stock in enumerate(st.session_state.recent_searches):
+    if recent_cols[i].button(stock.split(" ")[0], key=f"btn_{i}", use_container_width=True):
         st.session_state.current_selection = stock
+        # 버튼을 누르면 해당 종목을 리스트 맨 앞으로 이동
+        st.session_state.recent_searches.remove(stock)
+        st.session_state.recent_searches.insert(0, stock)
         st.rerun()
 
+# 전 종목 검색창
 all_names = df_krx['Display'].tolist()
-search_stock = st.selectbox("🔍 종목 검색 및 변경", options=all_names, 
+search_stock = st.selectbox("🔍 종목 검색", options=all_names, 
                             index=all_names.index(st.session_state.current_selection) if st.session_state.current_selection in all_names else 0,
                             label_visibility="collapsed")
 
+# 검색창에서 새로운 종목을 골랐을 때의 로직
 if search_stock != st.session_state.current_selection:
     st.session_state.current_selection = search_stock
+    # 최근 검색 리스트 업데이트 (중복 제거 후 맨 앞으로)
+    if search_stock in st.session_state.recent_searches:
+        st.session_state.recent_searches.remove(search_stock)
+    st.session_state.recent_searches.insert(0, search_stock)
+    # 최대 5개까지만 유지
+    st.session_state.recent_searches = st.session_state.recent_searches[:5]
     st.rerun()
 
 stock_info = df_krx[df_krx['Display'] == st.session_state.current_selection].iloc[0]
 ticker = f"{stock_info['Code']}.KS" if stock_info['Market'] == 'KOSPI' else f"{stock_info['Code']}.KQ"
 display_name = stock_info['Name']
 
+# 사이드바 (분석 옵션 및 초기화 버튼)
 with st.sidebar:
     st.header("⚙️ 분석 설정")
     use_ma = st.checkbox("방법 A: 이동평균선", value=True)
@@ -93,15 +98,10 @@ with st.sidebar:
     expert_mode = st.toggle("🛠️ 전문가 차트 보기", value=False)
     
     st.divider()
-    if st.button("⭐ 현재 종목 관심등록", use_container_width=True):
-        if st.session_state.current_selection not in st.session_state.watchlist:
-            st.session_state.watchlist.append(st.session_state.current_selection)
-            st.rerun()
-    if st.button("🗑️ 관심종목 삭제", use_container_width=True):
-        if len(st.session_state.watchlist) > 1:
-            st.session_state.watchlist.remove(st.session_state.current_selection)
-            st.session_state.current_selection = st.session_state.watchlist[0]
-            st.rerun()
+    # 최근 검색 초기화 버튼
+    if st.button("🗑️ 최근 검색 초기화", use_container_width=True):
+        st.session_state.recent_searches = [st.session_state.current_selection]
+        st.rerun()
 
 # --- 4. 분석 엔진 ---
 def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
@@ -125,7 +125,7 @@ def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
         results = []
         if u_ma:
             m5, m20 = float(last['MA5']), float(last['MA20'])
-            results.append(("이동평균선", "매수 추천" if m5 > m20 else "매도 추천", "상승 추세", 1 if m5 > m20 else -1))
+            results.append(("이동평균선", "매수 추천" if m5 > m20 else "매도 추천", "상승 추세" if m5 > m20 else "하락 추세", 1 if m5 > m20 else -1))
         if u_rsi:
             rv = float(last['RSI'])
             sc = 2 if rv < 35 else (-2 if rv > 70 else 0)
@@ -139,17 +139,15 @@ def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
             sc = 2 if p <= lo else (-2 if p >= up else 0)
             results.append(("볼린저밴드", "바닥권" if sc==2 else ("천장권" if sc==-2 else "안정적"), "밴드 하단", sc))
 
-        # 에러 방지용: 점수 합산 시 결과가 없을 경우 예외 처리
         avg = sum(r[3] for r in results) / len(results) if results else 0
         final = "강력 매수" if avg >= 1.2 else ("매수 추천" if avg >= 0.4 else ("강력 매도" if avg <= -1.2 else ("매도" if avg <= -0.4 else "관망")))
         return df, results, final, price_info
     except: return None, None, None, None
 
-# --- 5. 분석 결과 표시 (꼬인 괄호 정리 완료) ---
+# --- 5. 분석 결과 표시 ---
 df, indicators, final_status, price = analyze_stock(ticker, use_ma, use_rsi, use_vol, use_bb)
 
 if df is not None:
-    # 가격 정보
     color = "#e03131" if price['delta'] > 0 else "#1971c2"
     st.markdown(f"""
         <div class="price-container">
@@ -161,13 +159,11 @@ if df is not None:
         </div>
         """, unsafe_allow_html=True)
 
-    # 신호등 (CSS 클래스 호출 시 f-string 오류 수정)
     signals = ["강력 매도", "매도", "관망", "매수 추천", "강력 매수"]
     cmap = {"강력 매수":"active-strong-buy", "매수 추천":"active-buy", "관망":"active-hold", "매도":"active-sell", "강력 매도":"active-strong-sell"}
     boxes = "".join([f'<div class="signal-box {cmap[s] if s==final_status else ""}">{s}</div>' for s in signals])
     st.markdown(f'<div class="signal-container">{boxes}</div>', unsafe_allow_html=True)
     
-    # 상세 카드 (HTML 괄호 정리)
     for name, opinion, reason, score in indicators:
         c = "#2b8a3e" if "매수" in opinion or "바닥" in opinion else ("#e03131" if "매도" in opinion or "천장" in opinion else "#f08c00")
         st.markdown(f"""
