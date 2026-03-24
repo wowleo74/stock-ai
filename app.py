@@ -4,10 +4,17 @@ import pandas as pd
 import pandas_ta as ta
 import os
 
-# --- 1. 앱 설정 및 스타일 ---
+# --- 1. 앱 설정 및 아이콘 강제 지정 ---
+# 브라우저 탭 아이콘 설정
 st.set_page_config(page_title="Leo 주식비서", page_icon="icon.png", layout="wide")
 
+# 스마트폰 홈 화면 아이콘 전용 HTML (이 코드가 있어야 스트림릿 로고가 안 뜹니다)
 st.markdown("""
+    <head>
+        <link rel="apple-touch-icon" href="icon.png">
+        <link rel="shortcut icon" href="icon.png">
+        <link rel="icon" href="icon.png">
+    </head>
     <style>
     /* 메인 선택창 스타일 */
     .main-selector { background-color: #f1f3f5; padding: 15px; border-radius: 15px; margin-bottom: 20px; }
@@ -51,19 +58,17 @@ if 'watchlist' not in st.session_state:
 if 'current_selection' not in st.session_state:
     st.session_state.current_selection = "삼성전자 (005930)"
 
-# --- 3. 메인 화면 상단: 종목 선택 섹션 (이동!) ---
+# --- 3. 메인 화면 상단 ---
 st.title("🚦 Leo의 AI 주식 비서")
 
-# 관심종목 버튼을 가로로 배치 (모바일에서도 클릭하기 좋게)
 watch_cols = st.columns(len(st.session_state.watchlist))
 for i, stock in enumerate(st.session_state.watchlist):
     if watch_cols[i].button(stock.split(" ")[0], key=f"btn_{i}", use_container_width=True):
         st.session_state.current_selection = stock
         st.rerun()
 
-# 전 종목 검색창을 메인으로!
 all_names = df_krx['Display'].tolist()
-search_stock = st.selectbox("🔍 종목 검색 및 변경", options=all_names, 
+search_stock = st.selectbox("🔍 종목 검색", options=all_names, 
                             index=all_names.index(st.session_state.current_selection) if st.session_state.current_selection in all_names else 0,
                             label_visibility="collapsed")
 
@@ -71,12 +76,10 @@ if search_stock != st.session_state.current_selection:
     st.session_state.current_selection = search_stock
     st.rerun()
 
-# --- 4. 분석 로직 ---
 stock_info = df_krx[df_krx['Display'] == st.session_state.current_selection].iloc[0]
 ticker = f"{stock_info['Code']}.KS" if stock_info['Market'] == 'KOSPI' else f"{stock_info['Code']}.KQ"
 display_name = stock_info['Name']
 
-# 사이드바에는 설정 기능만 남김
 with st.sidebar:
     st.header("⚙️ 분석 설정")
     use_ma = st.checkbox("방법 A: 이동평균선", value=True)
@@ -90,13 +93,13 @@ with st.sidebar:
         if st.session_state.current_selection not in st.session_state.watchlist:
             st.session_state.watchlist.append(st.session_state.current_selection)
             st.rerun()
-    if st.button("🗑️ 관심종목에서 삭제", use_container_width=True):
+    if st.button("🗑️ 관심종목 삭제", use_container_width=True):
         if len(st.session_state.watchlist) > 1:
             st.session_state.watchlist.remove(st.session_state.current_selection)
             st.session_state.current_selection = st.session_state.watchlist[0]
             st.rerun()
 
-# --- 5. 분석 엔진 ---
+# --- 4. 분석 엔진 ---
 def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
     try:
         df = yf.download(symbol, period="1y", interval="1d", progress=False)
@@ -118,7 +121,7 @@ def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
         results = []
         if u_ma:
             m5, m20 = float(last['MA5']), float(last['MA20'])
-            results.append(("이동평균선", "매수 추천" if m5 > m20 else "매도 추천", "상승 추세" if m5 > m20 else "하락 추세", 1 if m5 > m20 else -1))
+            results.append(("이동평균선", "매수 추천" if m5 > m20 else "매도 추천", "상승 추세", 1 if m5 > m20 else -1))
         if u_rsi:
             rv = float(last['RSI'])
             sc = 2 if rv < 35 else (-2 if rv > 70 else 0)
@@ -130,18 +133,16 @@ def analyze_stock(symbol, u_ma, u_rsi, u_vol, u_bb):
         if u_bb:
             p, up, lo = curr_p, float(last['BB_Upper']), float(last['BB_Lower'])
             sc = 2 if p <= lo else (-2 if p >= up else 0)
-            results.append(("볼린저밴드", "바닥권" if sc==2 else ("천장권" if sc==-2 else "안정적"), "밴드 하단" if sc==2 else "정상", sc))
+            results.append(("볼린저밴드", "바닥권" if sc==2 else ("천장권" if sc==-2 else "안정적"), "밴드 하단", sc))
 
         avg = sum(r[3] for r in results) / len(results) if results else 0
         final = "강력 매수" if avg >= 1.2 else ("매수 추천" if avg >= 0.4 else ("강력 매도" if avg <= -1.2 else ("매도" if avg <= -0.4 else "관망")))
         return df, results, final, price_info
     except: return None, None, None, None
 
-# --- 6. 분석 결과 표시 ---
 df, indicators, final_status, price = analyze_stock(ticker, use_ma, use_rsi, use_vol, use_bb)
 
 if df is not None:
-    # 가격
     color = "#e03131" if price['delta'] > 0 else "#1971c2"
     st.markdown(f"""
         <div class="price-container">
@@ -153,13 +154,11 @@ if df is not None:
         </div>
         """, unsafe_allow_html=True)
 
-    # 신호등
     signals = ["강력 매도", "매도", "관망", "매수 추천", "강력 매수"]
     cmap = {"강력 매수":"active-strong-buy", "매수 추천":"active-buy", "관망":"active-hold", "매도":"active-sell", "강력 매도":"active-strong-sell"}
     boxes = "".join([f'<div class="signal-box {cmap[s] if s==final_status else ""}">{s}</div>' for s in signals])
     st.markdown(f'<div class="signal-container">{boxes}</div>', unsafe_allow_html=True)
     
-    # 상세 카드
     for name, opinion, reason, score in indicators:
         c = "#2b8a3e" if "매수" in opinion or "바닥" in opinion else ("#e03131" if "매도" in opinion or "천장" in opinion else "#f08c00")
         st.markdown(f"""
