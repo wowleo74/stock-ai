@@ -54,7 +54,7 @@ if 'current_selection' not in st.session_state:
     st.session_state.current_selection = "삼성전자 (005930)"
 
 # --- 3. 메인 화면 상단 ---
-st.title("🚦 Leo의 AI 주식 비서")
+st.title("🚦 Stock-Ai")
 
 # 최근 검색 종목 버튼 표시
 st.markdown("<div style='font-size: 0.9rem; color: #868e96; margin-bottom: 5px; font-weight: bold;'>🕒 최근 검색</div>", unsafe_allow_html=True)
