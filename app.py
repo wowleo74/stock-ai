@@ -5,7 +5,7 @@ import pandas_ta as ta
 import os
 
 # --- 1. 앱 설정 및 스타일 ---
-st.set_page_config(page_title="Leo의 AI 주식 비서", layout="wide")
+st.set_page_config(page_title="Leo 주식비서", page_icon="icon.png", layout="wide")
 
 st.markdown("""
     <style>
