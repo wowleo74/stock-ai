@@ -4,11 +4,10 @@ import pandas as pd
 import pandas_ta as ta
 import numpy as np
 import os
-import time
 import json
 
-# --- 1. PC 광폭 레이아웃 및 원본 스타일 설정 (전체 복구) ---
-st.set_page_config(page_title="Leo 주식 수익 검증 시스템", layout="wide")
+# --- 1. PC 광폭 레이아웃 및 원본 스타일 설정 (전체 복구 및 유지) ---
+st.set_page_config(page_title="Leo 실전 퀀트 스나이퍼", layout="wide")
 
 st.markdown("""
     <style>
@@ -22,20 +21,24 @@ st.markdown("""
     .guide-box { background-color: #f8f9fa; border-radius: 10px; padding: 15px; border-left: 5px solid #adb5bd; margin-bottom: 12px; line-height: 1.6; }
     .signal-container { display: flex; justify-content: center; gap: 10px; margin: 25px 0; }
     .signal-box { flex: 1; padding: 18px; border-radius: 12px; text-align: center; font-weight: bold; color: #adb5bd; background-color: #f8f9fa; border: 1px solid #e9ecef; font-size: 1.1rem; }
-    .active-strong-buy { background-color: #2b8a3e !important; color: white !important; border: 2px solid #51cf66 !important; }
-    .active-buy { background-color: #5c940d !important; color: white !important; border: 2px solid #94d82d !important; }
-    .active-hold { background-color: #f08c00 !important; color: white !important; border: 2px solid #ffc078 !important; }
-    .active-sell { background-color: #e03131 !important; color: white !important; border: 2px solid #ff8787 !important; }
-    .active-strong-sell { background-color: #c92a2a !important; color: white !important; border: 2px solid #ffa8a8 !important; }
+    
+    /* 신규 실전 매매 상태 컬러 */
+    .status-buy { background-color: #2b8a3e !important; color: white !important; border: 2px solid #51cf66 !important; }
+    .status-hold { background-color: #f08c00 !important; color: white !important; border: 2px solid #ffc078 !important; }
+    .status-wait { background-color: #868e96 !important; color: white !important; border: 2px solid #adb5bd !important; }
+    
     .rank-card { padding: 20px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 12px; background-color: #f8f9fa; display: flex; flex-direction: column; justify-content: center; transition: 0.2s; }
     .rank-card:hover { border-color: #228be6; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
     .rank-number { font-size: 1.6rem; font-weight: bold; color: #228be6; width: 45px; }
     .rank-name { font-size: 1.3rem; font-weight: bold; color: #212529; }
     .folder-box { border: 1px solid #ced4da; border-radius: 12px; padding: 20px; background-color: #f8f9fa; height: 100%; min-height: 300px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); }
+    .stop-loss-badge { display: inline-block; background-color: #fff5f5; color: #e03131; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 1rem; border: 1px solid #ffc9c9; margin-top: 10px; }
+    .market-good { display: inline-block; background-color: #e3fafc; color: #0c8599; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 1rem; border: 1px solid #99e9f2; margin-top: 10px; margin-right: 10px;}
+    .market-bad { display: inline-block; background-color: #fff0f6; color: #a61e4d; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 1rem; border: 1px solid #fcc2d7; margin-top: 10px; margin-right: 10px;}
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 데이터 관리 및 유틸리티 함수 (원본 보존) ---
+# --- 2. 데이터 관리 및 유틸리티 함수 ---
 WATCHLIST_FILE = "watchlist.json"
 
 def load_watchlist():
@@ -66,106 +69,144 @@ def get_detailed_info(symbol):
     try:
         ticker = yf.Ticker(symbol)
         info = ticker.info
+        if info is None: info = {}
         if not info or 'marketCap' not in info:
-            # 보완 로직
             f_info = ticker.fast_info
             info['marketCap'] = getattr(f_info, 'market_cap', 0)
             info['fiftyTwoWeekHigh'] = getattr(f_info, 'year_high', 0)
             info['fiftyTwoWeekLow'] = getattr(f_info, 'year_low', 0)
-            info['regularMarketPreviousClose'] = getattr(f_info, 'last_price', 0)
+            info['regularMarketPreviousClose'] = getattr(f_info, 'previous_close', 0)
         return info
     except: return {}
 
-# 화면 이동을 위한 콜백 (원본 핵심 로직)
 def move_to_detail(stock_display):
     st.session_state.current_selection = stock_display
     st.session_state.page_selection = "📊 단일 종목 분석"
 
-if 'current_selection' not in st.session_state:
-    st.session_state.current_selection = df_krx['Display'].iloc[0]
-if 'page_selection' not in st.session_state:
-    st.session_state.page_selection = "📊 단일 종목 분석"
-if 'search_results' not in st.session_state:
-    st.session_state.search_results = []
+if 'current_selection' not in st.session_state: st.session_state.current_selection = df_krx['Display'].iloc[0]
+if 'page_selection' not in st.session_state: st.session_state.page_selection = "📊 단일 종목 분석"
+if 'search_results' not in st.session_state: st.session_state.search_results = []
 
-# --- 3. 사이드바 메뉴 (원본 디자인 보존) ---
+# --- 3. 사이드바 메뉴 (불필요한 지표 선택 제거, 실전 변수만 남김) ---
 with st.sidebar:
     st.header("📌 메뉴 이동")
     page = st.radio("원하는 작업을 선택하세요", ["📊 단일 종목 분석", "🔍 조건 검색기 (스크리너)", "📂 관심종목 관리"], key="page_selection")
     
     st.divider()
-    st.header("⚙️ 분석 조건 설정")
-    st.subheader("🛠️ 지표 선택")
-    use_ma = st.checkbox("방법 A: 이동평균선", value=True)
-    use_rsi = st.checkbox("방법 B: RSI 심리", value=True)
-    use_vol = st.checkbox("방법 C: 거래량 실세", value=True)
-    use_bb = st.checkbox("방법 D: 볼린저 밴드", value=True)
-    use_macd = st.checkbox("방법 E: MACD 추세", value=True) 
+    st.header("⚙️ 실전 스나이퍼 설정")
+    st.info("💡 전략: 추세 + 눌림 + 수급 + 돌파")
     
-    st.divider()
-    ma_s = st.slider("단기 이평선 기간", 3, 20, 5)
-    ma_l = st.slider("장기 이평선 기간", 20, 120, 20)
+    ma_s = st.slider("단기 이평선 (눌림목 기준)", 3, 20, 5)
+    ma_l = st.slider("장기 이평선 (추세 기준)", 20, 120, 20)
     trading_fee_rate = st.number_input("왕복 수수료+세금 (%)", value=0.2, step=0.05) / 100
 
-# --- 4. 분석 엔진 (심장부 - 원본 로직 100% 무삭제) ---
-def analyze_reality_backtest(symbol, u_ma, u_rsi, u_vol, u_bb, u_macd, fee_rate):
+# --- 4. 코스피 시장 필터 로드 ---
+@st.cache_data(ttl=3600)
+def get_kospi_filter():
     try:
-        df = yf.download(symbol, period="1y", interval="1d", progress=False)
-        if df.empty or len(df) < 50: return None, None, None, 0, 0, 0, 0
+        kospi = yf.download("^KS11", period="2y", interval="1d", progress=False)
+        if isinstance(kospi.columns, pd.MultiIndex): kospi.columns = kospi.columns.get_level_values(0)
+        kospi['KOSPI_MA60'] = ta.sma(kospi['Close'], length=60)
+        kospi['Market_Good'] = kospi['Close'] > kospi['KOSPI_MA60']
+        return kospi[['Market_Good']]
+    except:
+        # 에러 시 기본적으로 매수 허용 (오프라인/에러 방어)
+        return pd.DataFrame()
+
+# --- 5. 실전 매매 분석 엔진 (대공사 완료) ---
+def analyze_sniper_backtest(symbol, fee_rate):
+    try:
+        df = yf.download(symbol, period="2y", interval="1d", progress=False)
+        if df.empty or len(df) < 60: return None, "에러", 0, 0, 0, False, 0
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         
-        # 지표 계산 로직
+        # 1. 코스피 시장 필터 적용
+        kospi_df = get_kospi_filter()
+        if not kospi_df.empty:
+            df = df.join(kospi_df, how='left')
+            df['Market_Good'] = df['Market_Good'].ffill().fillna(True)
+        else:
+            df['Market_Good'] = True
+
+        # 2. 필수 지표 계산
         df['MA_S'] = ta.sma(df['Close'], length=ma_s)
         df['MA_L'] = ta.sma(df['Close'], length=ma_l)
-        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['MA_20'] = ta.sma(df['Close'], length=20) # 20일선 (청산용)
         df['Vol_MA'] = ta.sma(df['Volume'], length=20)
-        bb = ta.bbands(df['Close'], length=20, std=2)
-        df['BB_U'], df['BB_M'], df['BB_L'] = bb.iloc[:, 2], bb.iloc[:, 1], bb.iloc[:, 0]
         macd_calc = ta.macd(df['Close'])
-        df['MACD_Line'], df['MACD_Hist'], df['MACD_Signal'] = macd_calc.iloc[:, 0], macd_calc.iloc[:, 1], macd_calc.iloc[:, 2]
-
-        # 점수 산정 (원본 무삭제 복구)
-        df['Score_MA'], df['Score_RSI'], df['Score_Vol'], df['Score_BB'], df['Score_MACD'] = 0, 0, 0, 0, 0
-        active_tools = 0
-        if u_ma:
-            active_tools += 1
-            spread = df['MA_S'] - df['MA_L']
-            df['Score_MA'] = np.select([(spread > 0) & (spread > spread.shift(1)), (spread > 0), (spread < 0) & (spread < spread.shift(1)), (spread < 0)], [2, 1, -2, -1], default=0)
-        if u_rsi:
-            active_tools += 1
-            df['Score_RSI'] = np.select([(df['RSI'] < 30), (df['RSI'] >= 30) & (df['RSI'] < 45), (df['RSI'] > 70), (df['RSI'] <= 70) & (df['RSI'] > 55)], [2, 1, -2, -1], default=0)
-        if u_vol:
-            active_tools += 1
-            v_ratio = df['Volume'] / df['Vol_MA']
-            pc = df['Close'].pct_change()
-            df['Score_Vol'] = np.select([(v_ratio > 2.0) & (pc > 0), (v_ratio > 1.5) & (pc > 0), (v_ratio > 2.0) & (pc < 0), (v_ratio > 1.5) & (pc < 0)], [2, 1, -2, -1], default=0)
-        if u_bb:
-            active_tools += 1
-            df['Score_BB'] = np.select([(df['Close'] <= df['BB_L']), (df['Close'] > df['BB_L']) & (df['Close'] < df['BB_M']), (df['Close'] >= df['BB_U']), (df['Close'] < df['BB_U']) & (df['Close'] > df['BB_M'])], [2, 1, -2, -1], default=0)
-        if u_macd:
-            active_tools += 1
-            df['Score_MACD'] = np.select([(df['MACD_Line'] > df['MACD_Signal']) & (df['MACD_Hist'] > 0), (df['MACD_Line'] > df['MACD_Signal']), (df['MACD_Line'] < df['MACD_Signal']) & (df['MACD_Hist'] < 0), (df['MACD_Line'] < df['MACD_Signal'])], [2, 1, -2, -1], default=0)
-
-        df['Avg_Score'] = (df['Score_MA'] + df['Score_RSI'] + df['Score_Vol'] + df['Score_BB'] + df['Score_MACD']) / active_tools if active_tools > 0 else 0
-        df['Position'] = np.where(df['Avg_Score'] >= 0.4, 1, 0)
-        df['Trade_Action'] = df['Position'].diff().fillna(0)
-        df['Daily_Return'] = df['Close'].pct_change()
-        df['Strategy_Return'] = (df['Position'].shift(1) * df['Daily_Return']) - np.where(df['Trade_Action'] != 0, fee_rate / 2, 0)
+        df['MACD_Line'], df['MACD_Signal'] = macd_calc.iloc[:, 0], macd_calc.iloc[:, 2]
+        df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14) # UI 표시용
         
-        s_profit = (1 + df['Strategy_Return']).cumprod().iloc[-1] - 1
-        b_profit = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
-        last = df.iloc[-1]
-        status = "강력 매수" if last['Avg_Score'] >= 1.5 else ("매수 추천" if last['Avg_Score'] >= 0.5 else ("강력 매도" if last['Avg_Score'] <= -1.5 else ("매도" if last['Avg_Score'] <= -0.5 else "관망")))
+        # 3. 가중치 점수 계산 (Total_Score)
+        score_ma = np.where(df['MA_S'] > df['MA_L'], 3, 0)
+        score_macd = np.where(df['MACD_Line'] > df['MACD_Signal'], 2, 0)
+        score_vol = np.where((df['Volume'] > df['Vol_MA'] * 1.5) & (df['Close'] > df['Open']), 2, 0)
+        score_mfi = np.where(df['MFI'] > 50, 2, 0)
+        df['Total_Score'] = score_ma + score_macd + score_vol + score_mfi
         
-        return df, status, s_profit, b_profit, last['Avg_Score']
-    except: return None, "에러", 0, 0, 0
+        # 4. 세부 진입 조건 설정
+        cond_score = df['Total_Score'] >= 5
+        cond_pullback = df['Close'] < (df['MA_S'] * 1.03)
+        cond_overheat = df['Close'].pct_change(10) < 0.30
+        cond_trigger = df['Close'] > df['High'].shift(1)
+        
+        # 5. 최종 매수 신호 (모든 조건 AND)
+        df['Buy_Signal'] = df['Market_Good'] & cond_score & cond_pullback & cond_overheat & cond_trigger
+
+        # 6. 실전 State-Based 백테스트 루프 (손절/익절 기계적 적용)
+        positions = np.zeros(len(df))
+        trade_actions = np.zeros(len(df))
+        in_position = False
+        entry_price = 0.0
+        
+        closes = df['Close'].values
+        ma20s = df['MA_20'].values
+        buy_signals = df['Buy_Signal'].values
+        
+        for i in range(1, len(df)):
+            if not in_position:
+                if buy_signals[i]:
+                    in_position = True
+                    entry_price = closes[i]
+                    positions[i] = 1
+                    trade_actions[i] = 1 # 매수
+            else:
+                # 이미 보유 중일 때 출구 전략 (손절 -5%, 익절 +10%, 또는 20일선 이탈)
+                if closes[i] <= entry_price * 0.95 or closes[i] >= entry_price * 1.10 or closes[i] < ma20s[i]:
+                    in_position = False
+                    positions[i] = 0
+                    trade_actions[i] = -1 # 매도
+                else:
+                    positions[i] = 1
+                    trade_actions[i] = 0 # 홀딩
+                    
+        df['Position'] = positions
+        df['Trade_Action'] = trade_actions
+        
+        # 수익률 계산 (최근 1년만 집중)
+        df_1y = df.iloc[-250:].copy()
+        df_1y['Daily_Return'] = df_1y['Close'].pct_change()
+        df_1y['Strategy_Return'] = (df_1y['Position'].shift(1) * df_1y['Daily_Return']) - np.where(df_1y['Trade_Action'] != 0, fee_rate / 2, 0)
+        
+        s_profit = (1 + df_1y['Strategy_Return']).cumprod().iloc[-1] - 1
+        b_profit = (df_1y['Close'].iloc[-1] / df_1y['Close'].iloc[0]) - 1
+        
+        # 현재 상태 판단
+        last = df_1y.iloc[-1]
+        if last['Position'] == 1 and last['Trade_Action'] == 1: status = "🎯 매수 타점 포착!"
+        elif last['Position'] == 1: status = "🟢 수익 극대화 (보유중)"
+        else: status = "⚪ 관망 대기"
+        
+        return df_1y, status, s_profit, b_profit, last['Total_Score'], last['Market_Good'], last['ATR']
+    except: return None, "에러", 0, 0, 0, False, 0
 
 
 # ====== [화면 1: 단일 종목 분석] ======
 if st.session_state.page_selection == "📊 단일 종목 분석":
     all_names = df_krx['Display'].tolist()
     current_index = all_names.index(st.session_state.current_selection) if st.session_state.current_selection in all_names else 0
-    search_stock = st.selectbox("🎯 분석할 종목 선택", options=all_names, index=current_index)
+    search_stock = st.selectbox("🎯 분석할 특정 종목을 고르세요", options=all_names, index=current_index)
     
     if search_stock != st.session_state.current_selection:
         st.session_state.current_selection = search_stock
@@ -174,21 +215,31 @@ if st.session_state.page_selection == "📊 단일 종목 분석":
     stock_info = df_krx[df_krx['Display'] == search_stock].iloc[0]
     ticker_sym = f"{stock_info['Code']}.KS" if stock_info['Market'] == 'KOSPI' else f"{stock_info['Code']}.KQ"
 
-    df, status, s_profit, b_profit, f_score = analyze_reality_backtest(ticker_sym, use_ma, use_rsi, use_vol, use_bb, use_macd, trading_fee_rate)
+    df, status, s_profit, b_profit, total_score, market_good, current_atr = analyze_sniper_backtest(ticker_sym, trading_fee_rate)
     details = get_detailed_info(ticker_sym)
 
     if df is not None:
-        # 🌟 1. 등락 정보 및 현재가 (색상 연동 + 콤마 적용)
         curr_p = df['Close'].iloc[-1]
-        prev_p = details.get('regularMarketPreviousClose', df['Close'].iloc[-2])
+        prev_p = details.get('regularMarketPreviousClose')
+        if not prev_p or prev_p == 0:
+            prev_p = df['Close'].iloc[-2] if len(df) > 1 else curr_p
+            
         diff = curr_p - prev_p
-        rate = (diff / prev_p) * 100
-        # 상승 빨강, 하락 파랑 결정
+        rate = (diff / prev_p) * 100 if prev_p > 0 else 0
         price_color = "#e03131" if diff > 0 else ("#1971c2" if diff < 0 else "#212529")
+        
+        # UI 전용 ATR 기반 권장 손절가
+        stop_loss_price = curr_p - (current_atr * 2) if current_atr > 0 else 0
 
         st.markdown(f"""
             <div style='background-color:#ffffff; padding:25px; border-radius:15px; border:2px solid #e9ecef; margin-bottom:20px;'>
-                <div style='display:flex; align-items:baseline; gap:20px;'>
+                <div>
+                    <span class='{"market-good" if market_good else "market-bad"}'>
+                        {"📈 시장: 매수 허용 (코스피 60일선 위)" if market_good else "📉 시장: 매수 금지 (코스피 60일선 아래)"}
+                    </span>
+                    {f"<span class='stop-loss-badge'>🛡️ 권장 손절가: {stop_loss_price:,.0f}원 (2ATR)</span>" if stop_loss_price > 0 else ""}
+                </div>
+                <div style='display:flex; align-items:baseline; gap:20px; margin-top:15px;'>
                     <span style='font-size:3.8rem; font-weight:bold; color:{price_color};'>{curr_p:,.0f}원</span>
                     <span style='font-size:2rem; font-weight:bold; color:{price_color};'>{"▲" if diff > 0 else "▼"} {abs(diff):,.0f} ({rate:+.2f}%)</span>
                 </div>
@@ -198,7 +249,6 @@ if st.session_state.page_selection == "📊 단일 종목 분석":
             </div>
         """, unsafe_allow_html=True)
 
-        # 🌟 2. 기업 펀더멘털 (콤마 적용 + 데이터 보강)
         def fmt(val, unit="", d=0): 
             if val is None or val == 0 or np.isnan(val): return "데이터 준비중"
             return f"{val:,.{d}f}{unit}"
@@ -218,73 +268,45 @@ if st.session_state.page_selection == "📊 단일 종목 분석":
             st.markdown(f"<div class='metric-container-box'><span class='info-label'>배당수익률</span><br><b class='info-value'>{fmt(details.get('dividendYield',0)*100, '%', 2)}</b></div>", unsafe_allow_html=True)
             st.markdown(f"<div class='metric-container-box'><span class='info-label'>52주 최저</span><br><b class='info-value'>{fmt(details.get('fiftyTwoWeekLow',0), '원')}</b></div>", unsafe_allow_html=True)
 
-        # 🌟 3. 분석 결과 요약 카드
         st.write("")
         st.markdown("<div style='background-color:#f8f9fa; padding:25px; border-radius:15px; margin-bottom:20px;'>", unsafe_allow_html=True)
         r1, r2, r3 = st.columns(3)
-        with r1: st.metric("AI 전략 수익률 (1년)", f"{s_profit*100:.2f}%")
+        with r1: st.metric("스나이퍼 전략 수익률 (1년)", f"{s_profit*100:.2f}%")
         with r2: st.metric("단순 보유 수익률 (1년)", f"{b_profit*100:.2f}%")
-        with r3: st.metric("AI 종합 점수", f"{f_score:.2f}점")
+        with r3: st.metric("타점 가중치 점수 (9점 만점)", f"{total_score:.0f}점")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # 시그널 박스 (원본 디자인)
-        signals = ["강력 매도", "매도", "관망", "매수 추천", "강력 매수"]
-        cmap = {"강력 매수":"active-strong-buy", "매수 추천":"active-buy", "관망":"active-hold", "매도":"active-sell", "강력 매도":"active-strong-sell"}
-        boxes = "".join([f'<div class="signal-box {cmap[s] if s==status else ""}">{s}</div>' for s in signals])
-        st.markdown(f'<div class="signal-container">{boxes}</div>', unsafe_allow_html=True)
+        status_class = "status-buy" if "매수 타점" in status else ("status-hold" if "보유중" in status else "status-wait")
+        st.markdown(f'<div class="signal-container"><div class="signal-box {status_class}" style="font-size:1.5rem;">{status}</div></div>', unsafe_allow_html=True)
         
-        st.subheader("📊 기술적 분석 차트")
-        st.line_chart(df[['Close', 'MA_S', 'MA_L']], height=480)
+        st.subheader("📊 스나이퍼 매매 차트 (진입/청산 20일선 표시)")
+        st.line_chart(df[['Close', 'MA_S', 'MA_20']], height=480)
 
-        # 🌟 4. [완벽 복구] 상세 분석 지표 설명 가이드 (레오님 요청)
+        # 🌟 4. [변경 완료] 스나이퍼 매매 전략 설명
         st.divider()
-        with st.expander("📖 Leo의 주식 투자 백과사전 (용어 설명 및 상세 분석 로직)", expanded=True):
-            st.markdown("#### 1️⃣ 핵심 투자 용어 설명")
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
-                st.markdown("""
-                <div class='guide-box'>
-                <b>PER (Price Earnings Ratio):</b> 주가를 주당순이익(EPS)으로 나눈 값입니다. 기업이 버는 돈에 비해 주가가 얼마나 비싼지/싼지 판단합니다. 낮을수록 '저평가'입니다.
-                <br><br><b>PBR (Price Book-value Ratio):</b> 주가를 주당순자산(BPS)으로 나눈 값입니다. 1배 미만이면 기업의 자산가치보다 주가가 싸다는 뜻입니다.
-                </div>
-                """, unsafe_allow_html=True)
-            with col_t2:
-                st.markdown("""
-                <div class='guide-box'>
-                <b>EPS (Earnings Per Share):</b> 주식 1주가 1년 동안 벌어들인 순이익입니다.
-                <br><br><b>배당수익률:</b> 주가 대비 배당금이 몇 %인지 나타냅니다. 고배당주는 하락장에서 훌륭한 방어막이 됩니다.
-                </div>
-                """, unsafe_allow_html=True)
+        with st.expander("📖 Leo의 스나이퍼 실전 매매 로직 가이드 (필독!)", expanded=True):
+            st.markdown("""
+            #### 1️⃣ 시장 필터 (비 올 때는 쉰다)
+            * **코스피 60일선 판단:** 코스피 지수가 60일선 아래로 무너지면, 개별 종목 점수가 아무리 좋아도 **절대 매수하지 않습니다.** 하락장에서 계좌를 지키는 핵심 방패입니다.
             
-            st.markdown("#### 2️⃣ Leo AI 엔진의 5단계 분석 로직")
-            st.markdown(f"""
-            <div class='guide-box'>
-            <b>📍 방법 A: 이동평균선 ({ma_s}일 & {ma_l}일)</b><br>
-            - 단기선이 장기선 위에 있고 간격이 넓어지면 <b>상승 동력 강력(+2점)</b><br>
-            - 단기선이 장기선 아래에 있으면 <b>하락 주의(-2점)</b>
-            </div>
-            <div class='guide-box'>
-            <b>📍 방법 B: RSI 심리 지표</b><br>
-            - 30 이하: 시장이 공포에 질려 과도하게 팔린 상태. <b>매수 기회(+2점)</b><br>
-            - 70 이상: 시장이 지나치게 열광한 과열 상태. <b>매도 고려(-2점)</b>
-            </div>
-            <div class='guide-box'>
-            <b>📍 방법 C: 거래량 실세</b><br>
-            - 평소 거래량의 1.5배~2배 이상 터지며 주가가 오르면 <b>진짜 세력 등장(+2점)</b><br>
-            - 거래량은 터지는데 주가가 내리면 <b>탈출 신호(-2점)</b>
-            </div>
-            <div class='guide-box'>
-            <b>📍 방법 D: 볼린저 밴드</b><br>
-            - 주가가 밴드 하단선에 닿거나 뚫고 내려가면 <b>통계적 저점(+2점)</b><br>
-            - 밴드 상단선에 닿으면 <b>단기 고점(-2점)</b>
-            </div>
-            <div class='guide-box'>
-            <b>📍 방법 E: MACD 추세 변곡점</b><br>
-            - MACD선이 시그널선을 골든크로스하고 히스토그램이 양수면 <b>추세 전환 성공(+2점)</b>
-            </div>
-            """, unsafe_allow_html=True)
+            #### 2️⃣ 가중치 타점 점수 (Total Score: 5점 이상 합격)
+            * **이동평균선 추세 (3점):** 단기 이평선이 장기 이평선 위에 있는가?
+            * **MACD 돌파 (2점):** MACD가 시그널선을 골든크로스 했는가?
+            * **거래량 실세 (2점):** 거래량이 평소의 1.5배 이상 터지며 양봉인가?
+            * **MFI 수급 (2점):** 돈(수급)이 확실히 들어오고 있는가 (MFI > 50)?
+            
+            #### 3️⃣ 3대 정밀 사격 조건 (스나이퍼 룰)
+            * **눌림목 포착:** 주가가 단기 이평선 대비 너무 붕 떠있지 않고 3% 이내로 눌려있을 때만 진입합니다.
+            * **과열 방지:** 최근 10일간 30% 이상 급등한 종목은 피합니다. (고점 물림 방지)
+            * **돌파 트리거:** 전일 고가를 시원하게 뚫어버리는 순간 방아쇠를 당깁니다.
+            
+            #### 4️⃣ 기계적 청산 로직 (출구 전략)
+            * **익절 (+10%):** 매수가 대비 10% 상승 시 미련 없이 수익을 챙깁니다.
+            * **손절 (-5%):** 매수가 대비 5% 하락 시 기계적으로 손절하여 시드를 보호합니다.
+            * **추세 이탈:** 수익권이더라도 주가가 20일선을 깨고 내려오면 전량 매도합니다.
+            """)
 
-        # 관심종목 저장 (원본 유지)
+        # 관심종목 저장
         st.divider()
         col_f, col_b = st.columns([3, 1])
         f_name = col_f.selectbox("저장할 폴더를 선택하세요", ["관심종목1", "관심종목2", "관심종목3"], label_visibility="collapsed")
@@ -296,7 +318,7 @@ if st.session_state.page_selection == "📊 단일 종목 분석":
                 st.toast(f"✅ {stock_info['Name']} 저장 완료!")
 
 
-# ====== [화면 2: 조건 검색기 - 원본 로직 무삭제 복구] ======
+# ====== [화면 2: 조건 검색기 - 실전 매매 우선 정렬 적용] ======
 elif st.session_state.page_selection == "🔍 조건 검색기 (스크리너)":
     st.title("🕸️ 나만의 조건 검색기")
     scan_mode = st.radio("어떤 종목들을 검색해볼까요?", ["📈 시가총액 우량주 스캔", "📝 내 관심종목 폴더 스캔"], horizontal=True)
@@ -318,24 +340,32 @@ elif st.session_state.page_selection == "🔍 조건 검색기 (스크리너)":
     if st.button("🚀 조건 검색 실행", type="primary", use_container_width=True):
         if target_stocks.empty: st.error("스캔할 종목이 없습니다.")
         else:
-            my_bar = st.progress(0, text="정밀 분석 중...")
+            my_bar = st.progress(0, text="정밀 타점 스캔 중...")
             temp_results = []
             for idx, (i, row) in enumerate(target_stocks.iterrows()):
                 t_code = f"{row['Code']}.KS" if row['Market'] == 'KOSPI' else f"{row['Code']}.KQ"
-                df_res, status, s_prof, _, f_score = analyze_reality_backtest(t_code, use_ma, use_rsi, use_vol, use_bb, use_macd, trading_fee_rate)
+                df_res, status, s_prof, _, t_score, m_good, _ = analyze_sniper_backtest(t_code, trading_fee_rate)
                 if df_res is not None:
-                    temp_results.append({'종목명': row['Name'], '종목코드': row['Code'], 'Display': row['Display'], 'AI추천상태': status, '종합점수': round(f_score, 2), '1년AI수익률(%)': round(s_prof * 100, 2)})
+                    temp_results.append({'종목명': row['Name'], '종목코드': row['Code'], 'Display': row['Display'], '상태': status, '타점점수': t_score, '1년전략수익률(%)': round(s_prof * 100, 2)})
                 my_bar.progress((idx + 1) / len(target_stocks))
             my_bar.empty()
-            st.session_state.search_results = sorted(temp_results, key=lambda x: x['종합점수'], reverse=True)[:top_n]
+            
+            # [🔥 핵심 업데이트] 타점 1순위, 점수 2순위로 정렬 로직 변경
+            def sort_priority(item):
+                if "매수 타점" in item['상태']: p = 1
+                elif "보유중" in item['상태']: p = 2
+                else: p = 3
+                return (p, -item['타점점수']) # p가 낮을수록(1) 상위, 타점점수는 높을수록 상위
+                
+            st.session_state.search_results = sorted(temp_results, key=sort_priority)[:top_n]
 
     if st.session_state.search_results:
-        st.subheader("🏆 현재 조건 종합 랭킹 TOP")
+        st.subheader("🏆 실전 매매 타점 랭킹 TOP (매수발생 우선)")
         df_csv = pd.DataFrame(st.session_state.search_results).drop(columns=['Display'])
-        st.download_button("💾 엑셀(CSV) 저장", data=df_csv.to_csv(index=False).encode('utf-8-sig'), file_name="Leo_퀀트검색.csv", mime="text/csv", use_container_width=True)
+        st.download_button("💾 엑셀(CSV) 저장", data=df_csv.to_csv(index=False).encode('utf-8-sig'), file_name="Leo_스나이퍼검색.csv", mime="text/csv", use_container_width=True)
         st.divider()
         for rank, item in enumerate(st.session_state.search_results):
-            score_color = "#2b8a3e" if item['종합점수'] > 0 else "#e03131"
+            score_color = "#2b8a3e" if "매수 타점" in item['상태'] else ("#f08c00" if "보유중" in item['상태'] else "#868e96")
             c_info, c_btn = st.columns([4, 1])
             with c_info:
                 st.markdown(f"""
@@ -345,16 +375,16 @@ elif st.session_state.page_selection == "🔍 조건 검색기 (스크리너)":
                             <span class='rank-name'>{item['종목명']} <small style='color:#868e96;'>({item['종목코드']})</small></span>
                         </div>
                         <div style='margin-top: 10px; font-weight:bold; color:{score_color}; font-size:1.1rem;'>
-                            {item['AI추천상태']} (점수: {item['종합점수']}) | 1년 AI수익률: {item['1년AI수익률(%)']}%
+                            {item['상태']} (점수: {item['타점점수']}점) | 1년 전략수익률: {item['1년전략수익률(%)']}%
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
             with c_btn:
                 st.write("") 
-                st.button("📈 상세 분석", key=f"go_{item['종목코드']}", on_click=move_to_detail, args=(item['Display'],), use_container_width=True)
+                st.button("📈 타점 분석", key=f"go_{item['종목코드']}", on_click=move_to_detail, args=(item['Display'],), use_container_width=True)
 
 
-# ====== [화면 3: 관심종목 관리 - 원본 로직 무삭제 복구] ======
+# ====== [화면 3: 관심종목 관리] ======
 elif st.session_state.page_selection == "📂 관심종목 관리":
     st.title("📂 내 관심종목 관리")
     wl = load_watchlist()
