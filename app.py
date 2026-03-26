@@ -166,7 +166,7 @@ with st.sidebar:
     trading_fee_rate = st.number_input("왕복 수수료+세금 (%)", value=0.2, step=0.05) / 100
 
 
-# --- 5. 실전 매매 분석 엔진 (소프트 시장 필터 완벽 적용) ---
+# --- 5. 실전 매매 분석 엔진 (±3% 갭 필터 적용 완료) ---
 def analyze_sniper_backtest(symbol, fee_rate, w_ma, w_macd, w_vol, w_mfi, target_score, atr_sl, atr_tp):
     try:
         df = yf.download(symbol, period="3y", interval="1d", progress=False) 
@@ -200,16 +200,11 @@ def analyze_sniper_backtest(symbol, fee_rate, w_ma, w_macd, w_vol, w_mfi, target
         score_vol = np.where((df['Volume'] > df['Vol_MA'] * 1.5) & (df['Close'] > df['Open']), w_vol, 0)
         score_mfi = np.where(df['MFI'] > 50, w_mfi, 0)
         
-        # [🔥 신규 1] 기본 점수 산출
         df['Total_Score'] = score_ma + score_macd + score_vol + score_mfi
-        
-        # [🔥 신규 2] 소프트 시장 필터 적용 (미래참조 방지를 위해 shift 1 적용 유지)
         cond_market_soft = np.where(df['Market_Good'].shift(1).fillna(True), 1.0, 0.5)
         df['Final_Score'] = df['Total_Score'] * cond_market_soft
         
-        # [🔥 신규 3] 최종 점수로 커트라인 판별 (하락장 진입을 원천 차단하는 마법의 수식)
         cond_score = df['Final_Score'] >= target_score
-        
         cond_pullback = df['Close'] < (df['MA_S'] * 1.03)
         cond_overheat = df['Close'].pct_change(10) < 0.30
         cond_trigger = df['Close'] > df['High'].shift(1)
@@ -239,16 +234,24 @@ def analyze_sniper_backtest(symbol, fee_rate, w_ma, w_macd, w_vol, w_mfi, target
         
         for i in range(1, len(df)):
             if not in_position:
+                # [🔥 수정됨] 전일 매수 신호가 떠도, 시초가 갭이 ±3%를 벗어나면 매수 포기
                 if buy_signals[i-1]: 
-                    in_position = True
-                    entry_price = opens[i] 
+                    prev_close = closes[i-1]
+                    gap = (opens[i] / prev_close) - 1 if prev_close > 0 else 0
                     
-                    sl_price = entry_price - (atrs[i-1] * atr_sl)
-                    tp_price = entry_price + (atrs[i-1] * atr_tp)
-                    
-                    positions[i] = 1
-                    trade_actions[i] = 1 
-                    total_trades += 1
+                    if -0.03 <= gap <= 0.03:
+                        in_position = True
+                        entry_price = opens[i] 
+                        
+                        sl_price = entry_price - (atrs[i-1] * atr_sl)
+                        tp_price = entry_price + (atrs[i-1] * atr_tp)
+                        
+                        positions[i] = 1
+                        trade_actions[i] = 1 
+                        total_trades += 1
+                    else:
+                        positions[i] = 0
+                        trade_actions[i] = 0
             else:
                 exit_price = None
                 
@@ -302,11 +305,10 @@ def analyze_sniper_backtest(symbol, fee_rate, w_ma, w_macd, w_vol, w_mfi, target
         
         last = df.iloc[-1]
         
-        if df['Buy_Signal'].iloc[-1]: status = "🔥 강력 매수 (내일 아침 진입)"
+        if df['Buy_Signal'].iloc[-1]: status = "🔥 강력 매수 대기"
         elif last['Position'] == 1: status = "🛡️ 보유자 영역 (Hold)"
         else: status = "👀 관망"
         
-        # 화면의 "현재 점수"가 헷갈리지 않게 0.5가 곱해진 Final_Score를 반환합니다.
         return df_1y, status, cagr, mdd, win_rate, b_profit, last['Final_Score'], last['Market_Good'], last['ATR']
     except: return None, "에러", 0, 0, 0, 0, 0, False, 0
 
@@ -366,8 +368,24 @@ if st.session_state.page_selection == "📊 단일 종목 분석":
         with r3: st.metric("전략 승률 (Win Rate)", f"{win_rate:.1f}%")
         with r4: st.metric("단순 존버 수익률", f"{b_profit*100:.2f}%")
 
-        status_class = "status-buy" if "강력 매수" in status else ("status-hold" if "보유자 영역" in status else "status-wait")
-        st.markdown(f'<div class="signal-container"><div class="signal-box {status_class}" style="font-size:1.5rem;">{status} (최종 점수: {total_score:.1f}점 / 진입선: {target_score}점)</div></div>', unsafe_allow_html=True)
+        # [🔥 수정됨] 강력 매수 상태일 때 내일 아침 진입 허용 범위(±3%)를 계산하여 안전하게 가이드
+        if "강력 매수" in status:
+            min_entry = curr_p * 0.97
+            max_entry = curr_p * 1.03
+            status_html = f"""
+                <div class="signal-box status-buy" style="font-size:1.4rem;">
+                    🔥 강력 매수 (최종 점수: {total_score:.1f}점)<br>
+                    <span style='font-size:1.1rem; color:#f8f9fa; font-weight:normal;'>
+                        👉 내일 시가 진입 허용 구간: <b>{min_entry:,.0f}원 ~ {max_entry:,.0f}원</b> (±3% 이내)<br>
+                        ⚠️ 이 가격을 벗어나서 출발하면 절대 매수 금지 (갭 리스크)
+                    </span>
+                </div>
+            """
+        else:
+            status_class = "status-hold" if "보유자 영역" in status else "status-wait"
+            status_html = f'<div class="signal-box {status_class}" style="font-size:1.5rem;">{status} (최종 점수: {total_score:.1f}점 / 진입선: {target_score}점)</div>'
+            
+        st.markdown(f'<div class="signal-container">{status_html}</div>', unsafe_allow_html=True)
         
         st.subheader("📊 스나이퍼 매매 차트 (진입/청산 20일선 표시)")
         st.line_chart(df[['Close', 'MA_S', 'MA_20']], height=450)
@@ -575,12 +593,13 @@ elif st.session_state.page_selection == "📖 주식 & 전략 백과사전":
     * **승률 (Win Rate):** 전체 매매 횟수 중 수익을 내고 나온 매매의 비율.
     """)
     
-    st.header("2. 🎯 스나이퍼 트리거 (거래대금 필터 추가)")
+    st.header("2. 🎯 스나이퍼 트리거 (거래대금 & 갭 필터)")
     st.info("""
     * **① 눌림목 (Pullback):** `현재가 < 단기 이평선(MA_S) * 1.03`
     * **② 과열 방지:** `10일 수익률 < 30%`
     * **③ 돌파 (Breakout):** `현재가 > 전일 고가`
-    * **④ 거래대금 필터 (핵심):** `오늘 거래대금 > 20일 평균 거래대금 * 1.5` (단순 거래량이 아닌, 실제 돈이 몰려야만 합격)
+    * **④ 거래대금 필터:** `오늘 거래대금 > 20일 평균 거래대금 * 1.5` (실제 스마트머니 유입 확인)
+    * **⑤ 시초가 갭 필터 (핵심 방어막):** 아무리 전날 조건이 완벽했어도, 다음 날 아침 **시초가가 전일 종가 대비 ±3% 범위를 벗어나서 출발하면 절대 매수하지 않고 패스(Pass)** 합니다. (상한가 추격 방지 및 악재 갭하락 방지)
     """)
     
     st.header("3. 🛡️ 소프트 시장 필터 & AI 오토 스위칭")
