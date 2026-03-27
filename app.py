@@ -183,7 +183,7 @@ if 'page_selection' not in st.session_state:
 if 'search_results' not in st.session_state: 
     st.session_state.search_results = []
 
-# --- V3.1 타점 엔진 (로직 완화 버전) ---
+# --- V3.1 타점 엔진 ---
 def analyze_sniper_backtest(symbol, fee_rate):
     try:
         df = yf.download(symbol, period="3y", interval="1d", progress=False) 
@@ -432,7 +432,6 @@ if st.session_state.page_selection == "📊 단일 종목 분석":
         stop_loss_price = curr_p - (current_atr * sl_mult) if current_atr > 0 else 0
         take_profit_price = curr_p + (current_atr * tp_mult) if current_atr > 0 else 0
         
-        # 재무 및 52주 지표 포맷팅
         mcap = details.get('marketCap', 0)
         if mcap > 0:
             mcap_str = f"{int(mcap // 1000000000000)}조 {int((mcap % 1000000000000) // 100000000)}억"
@@ -466,7 +465,6 @@ if st.session_state.page_selection == "📊 단일 종목 분석":
         stop_badge_html = f"<span class='stop-loss-badge'>🛡️ 자동 손절: {stop_loss_price:,.0f}원</span>" if stop_loss_price > 0 else ""
         profit_badge_html = f"<span class='take-profit-badge'>🚀 자동 익절: {take_profit_price:,.0f}원</span>" if take_profit_price > 0 else ""
 
-        # [버그 수정 완료] 들여쓰기를 제거하여 HTML이 깨지지 않게 보호합니다.
         st.markdown(f"""
 <div style='background-color:#ffffff; padding:25px; border-radius:15px; border:2px solid #e9ecef; margin-bottom:20px;'>
 <div style='margin-bottom:15px;'>
@@ -751,27 +749,29 @@ elif st.session_state.page_selection == "📖 주식 & 전략 백과사전":
     with tab2:
         st.header("📱 영웅문S# 100% 자동매매 세팅법 (직장인 퀀트 필수)")
         
-        with st.expander("☀️ 1단계: 살 때 (신규종목 시가 자동매수)", expanded=True):
+        with st.expander("☀️ 1단계: 살 때 (🚨 지정가 함정 매수법)", expanded=True):
             st.markdown("""
             **언제?** 전날 밤 ~ 당일 오전 8시 30분 사이 (출근 전)
-            **목적:** 아침 9시 시가가 '진입 허용 구간' 안에 들어올 때만 기계적으로 매수
+            **목적:** 아침 9시 시가가 '진입 허용 구간' 안에 들어올 때만 기계적으로 매수 (폭락장 뇌동매매 원천 차단)
             
             1. **경로:** 앱 하단 [메뉴] ➔ [주식] ➔ [주문] ➔ **[자동감시주문]**
             2. 상단 탭에서 **[신규종목]** 선택 ➔ **[조건추가]** 클릭 ➔ 스캔한 타겟 종목 검색
-            3. **감시 조건:** '현재가'가 프로그램이 알려준 **[진입 허용 구간]의 최저가 이상 ~ 최고가 이하**일 때로 설정
-            4. **주문 설정:** 종류는 무조건 **[시장가]**, 수량은 권장 비중에 맞춰 입력
-            5. **실행:** [조건저장] 후 반드시 **[▶ 감시시작]** 버튼 누르기 (유효기간: 1일)
+            3. **감시 조건:** '현재가' **`>=` (이상)** 선택 후, 프로그램이 알려준 **[최저가]** 입력 (예: 1,000원)
+            4. **주문 설정 (종류):** 시장가가 아닌 **[보통(지정가)]** 선택 ★★★
+            5. **주문 설정 (가격):** 프로그램이 알려준 **[최고가]** 입력 (예: 1,050원)
+            6. **주문 설정 (수량):** 권장 비중에 맞춰 계산된 주식 수 입력
+            7. **실행:** 유효기간 `1일` 세팅 및 [조건저장] ➔ 밖으로 나가서 반드시 **[▶ 감시시작]** 누르기
             """)
             
-        with st.expander("🛡️ 2단계: 팔 때 (잔고편입 스탑로스)", expanded=True):
+        with st.expander("🛡️ 2단계: 팔 때 (스탑로스 완벽 방어막)", expanded=True):
             st.markdown("""
             **언제?** 주식이 매수 체결된 것을 확인한 직후 (업무 중 잠깐)
-            **목적:** 장중 폭락(손절)과 급등(익절)에 대비해 인간의 감정을 배제하고 방어막 치기
+            **목적:** 장중 폭락(손절)과 급등(익절)에 대비해 인간의 감정을 배제하고 기계적으로 탈출하기
             
             1. **경로:** [메뉴] ➔ [주식] ➔ [주문] ➔ **[자동감시주문]**
             2. 상단 탭에서 **[잔고편입]** 선택 ➔ 방금 체결된 내 주식 클릭
-            3. **감시 조건:** - **이익실현 (익절):** 체크 후, 프로그램의 **[목표 익절가]** 입력
-               - **이익보존/손실제한 (손절):** 체크 후, 프로그램의 **[한계 손절가]** 입력 (★제일 중요)
-            4. **주문 설정:** 종류는 무조건 **[시장가]**, 수량은 **[100%]** (전량 매도)
-            5. **실행:** [조건저장] 후 **[▶ 감시시작]** 버튼 누르기 (유효기간: 최장 90일)
+            3. **감시 조건 (익절):** `[v] 이익실현` 체크 ➔ **`현재가` / `도달 시`** 로 변경 ➔ 프로그램의 **[🚀 목표 익절가]** 입력
+            4. **감시 조건 (손절):** `[v] 손실제한` 체크 ➔ **`현재가` / `도달 시`** 로 변경 ➔ 프로그램의 **[🛡️ 한계 손절가]** 입력 (★가장 중요)
+            5. **주문 설정:** 종류는 무조건 **[시장가]**, 수량은 전량 매도를 위해 **[100% (잔고전량)]** 선택 ★★★
+            6. **실행:** 유효기간 **`90일`** 넉넉히 세팅 후 [조건저장] ➔ 밖으로 나가서 반드시 **[▶ 감시시작]** 누르기
             """)
