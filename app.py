@@ -5,773 +5,975 @@ import pandas_ta as ta
 import numpy as np
 import os
 import json
+from datetime import datetime, timedelta
 
-# --- 1. PC 광폭 레이아웃 및 스타일 ---
-st.set_page_config(page_title="Leo 실전 퀀트 스나이퍼", layout="wide")
+# ==========================================================
+# --- [섹션 0] 시스템 초기화 및 세션 상태 설정 (에러 방지) ---
+# ==========================================================
 
+# 프로그램이 처음 실행될 때 메뉴와 상태를 미리 정의합니다.
+# 이렇게 해야 'page_selection' 에러가 나지 않습니다.
+
+if 'page_selection' not in st.session_state:
+    st.session_state['page_selection'] = "📊 단일 종목 분석"
+
+if 'current_selection' not in st.session_state:
+    st.session_state['current_selection'] = "삼성전자 (005930)"
+
+if 'search_results' not in st.session_state:
+    st.session_state['search_results'] = []
+
+# ==========================================================
+# --- [섹션 1] 전체 페이지 레이아웃 및 스타일 정의 ---
+# ==========================================================
+
+st.set_page_config(
+    page_title="Leo 퀀트 스나이퍼 v4.4 (최종)",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 커스텀 CSS 정의 (화면을 예쁘게 만들기 위한 코드)
 st.markdown("""
     <style>
-    .index-card { background-color: #f8f9fa; padding: 15px; border-radius: 12px; text-align: center; border: 1px solid #dee2e6; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-    .index-name { font-size: 0.95rem; color: #495057; font-weight: bold; margin-bottom: 5px; }
-    .index-value { font-size: 1.4rem; font-weight: bold; }
-    .index-change { font-size: 0.95rem; font-weight: bold; margin-top: 3px; }
-    .report-card { padding: 20px; border-radius: 15px; background-color: #ffffff; border-left: 8px solid #228be6; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .signal-box { flex: 1; padding: 18px; border-radius: 12px; text-align: center; font-weight: bold; color: #adb5bd; background-color: #f8f9fa; border: 1px solid #e9ecef; font-size: 1.1rem; }
+    /* 전체 배경색상 설정 */
+    .main {
+        background-color: #f8f9fa;
+    }
+
+    /* 상단 지수 카드 디자인 */
+    .index-card {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+        border: 1px solid #e9ecef;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+    }
+    .index-name {
+        font-size: 1.0rem;
+        color: #495057;
+        font-weight: bold;
+        margin-bottom: 8px;
+    }
+    .index-value {
+        font-size: 1.6rem;
+        font-weight: bold;
+    }
+    .index-change {
+        font-size: 1.0rem;
+        font-weight: bold;
+        margin-top: 5px;
+    }
+
+    /* 종목 상태 표시 배지 */
+    .market-badge {
+        display: inline-block;
+        padding: 6px 15px;
+        border-radius: 25px;
+        font-weight: bold;
+        font-size: 0.95rem;
+        margin-right: 8px;
+        border: 1px solid #dee2e6;
+        background-color: #f1f3f5;
+    }
+    .stop-loss-badge {
+        display: inline-block;
+        background-color: #fff5f5;
+        color: #e03131;
+        padding: 6px 15px;
+        border-radius: 25px;
+        font-weight: bold;
+        font-size: 0.95rem;
+        border: 1px solid #ffc9c9;
+        margin-right: 8px;
+    }
+    .take-profit-badge {
+        display: inline-block;
+        background-color: #f4fce3;
+        color: #5c940d;
+        padding: 6px 15px;
+        border-radius: 25px;
+        font-weight: bold;
+        font-size: 0.95rem;
+        border: 1px solid #d8f5a2;
+        margin-right: 8px;
+    }
+    .weight-badge {
+        display: inline-block;
+        background-color: #e6fcf5;
+        color: #08a081;
+        padding: 6px 15px;
+        border-radius: 25px;
+        font-weight: bold;
+        font-size: 0.95rem;
+        border: 1px solid #63e6be;
+    }
+
+    /* 백테스팅 성적표 박스 */
+    .stat-box {
+        background-color: #ffffff;
+        border: 1px solid #e9ecef;
+        padding: 20px;
+        border-radius: 12px;
+        text-align: center;
+        flex: 1;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    }
+    .stat-label {
+        font-size: 0.9rem;
+        color: #868e96;
+        margin-bottom: 8px;
+    }
+    .stat-value {
+        font-size: 1.4rem;
+        font-weight: bold;
+        color: #212529;
+    }
+
+    /* 시그널 알림 상자 */
+    .signal-box {
+        padding: 25px;
+        border-radius: 15px;
+        text-align: center;
+        font-weight: bold;
+        font-size: 1.3rem;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
     .status-buy { background-color: #2b8a3e !important; color: white !important; border: 2px solid #51cf66 !important; }
     .status-hold { background-color: #f08c00 !important; color: white !important; border: 2px solid #ffc078 !important; }
     .status-wait { background-color: #868e96 !important; color: white !important; border: 2px solid #adb5bd !important; }
-    .rank-card { padding: 15px; border-radius: 12px; border: 1px solid #dee2e6; margin-bottom: 8px; background-color: #ffffff; display: flex; flex-direction: column; justify-content: center; transition: 0.2s; }
-    .rank-card:hover { border-color: #228be6; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-    .stop-loss-badge { display: inline-block; background-color: #fff5f5; color: #e03131; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 0.95rem; border: 1px solid #ffc9c9; margin-top: 10px; margin-right: 5px;}
-    .take-profit-badge { display: inline-block; background-color: #f4fce3; color: #5c940d; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 0.95rem; border: 1px solid #d8f5a2; margin-top: 10px;}
-    .market-badge { display: inline-block; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 0.95rem; margin-top: 10px; margin-right: 5px; border: 1px solid #ced4da; }
-    .weight-badge { display: inline-block; background-color: #e6fcf5; color: #08a081; padding: 5px 12px; border-radius: 20px; font-weight: bold; font-size: 0.95rem; border: 1px solid #63e6be; margin-top: 10px; margin-right: 5px;}
-    .portfolio-card { padding: 20px; border-radius: 12px; border: 1px solid #ced4da; background-color: #ffffff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px; border-left: 6px solid #495057; }
-    .pf-profit { border-left-color: #e03131 !important; }
-    .pf-loss { border-left-color: #1971c2 !important; }
-    .pf-title { font-size: 1.4rem; font-weight: bold; margin-bottom: 10px; }
-    .pf-detail { font-size: 1.1rem; color: #495057; }
-    .folder-box { border: 1px solid #ced4da; border-radius: 12px; padding: 20px; background-color: #f8f9fa; height: 100%; min-height: 300px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); }
+
+    /* 포트폴리오 관리 카드 */
+    .portfolio-card {
+        padding: 25px;
+        border-radius: 15px;
+        background-color: #ffffff;
+        border: 1px solid #dee2e6;
+        margin-bottom: 20px;
+        border-left: 10px solid #495057;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.03);
+    }
+
+    /* 스크리너 내 랭킹 카드 */
+    .rank-card {
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #dee2e6;
+        margin-bottom: 12px;
+        background-color: #ffffff;
+        transition: 0.3s;
+    }
+    .rank-card:hover {
+        border-color: #228be6;
+        box-shadow: 0 6px 15px rgba(0,0,0,0.1);
+    }
+
+    /* 관심종목 폴더 섹션 */
+    .folder-box {
+        border: 1px solid #dee2e6;
+        border-radius: 15px;
+        padding: 25px;
+        background-color: #ffffff;
+        min-height: 450px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.02);
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 5대 시장 지수 ---
-def display_market_indices():
+# ==========================================================
+# --- [섹션 2] 데이터 유틸리티 함수 정의 ---
+# ==========================================================
+
+def display_market_header():
+    """상단에 실시간 시장 지수 띠를 출력하는 함수입니다."""
     try:
-        tickers = {
+        # 주요 지수 티커 정의
+        ticker_list = {
             "🇰🇷 KOSPI": "^KS11", 
             "🇰🇷 KOSDAQ": "^KQ11", 
             "🇺🇸 S&P 500": "^GSPC", 
             "🇺🇸 나스닥": "^IXIC", 
             "🇺🇸 다우존스": "^DJI"
         }
-        indices = yf.download(list(tickers.values()), period="5d", interval="1d", progress=False)['Close']
-        cols = st.columns(5)
         
-        for i, (name, ticker) in enumerate(tickers.items()):
-            s = indices[ticker].dropna()
-            if len(s) >= 2:
-                curr = s.iloc[-1]
-                prev = s.iloc[-2]
-                diff = curr - prev
-                rate = (diff / prev) * 100
+        # 야후 파이낸스에서 데이터 로드
+        data = yf.download(list(ticker_list.values()), period="5d", interval="1d", progress=False)['Close']
+        
+        # 5칸 레이아웃 생성
+        market_cols = st.columns(5)
+        
+        for i, (name, symbol) in enumerate(ticker_list.items()):
+            series = data[symbol].dropna()
+            
+            if len(series) >= 2:
+                current_val = series.iloc[-1]
+                previous_val = series.iloc[-2]
+                change_val = current_val - previous_val
+                change_pct = (change_val / previous_val) * 100
                 
-                if diff > 0:
-                    color = "#e03131"
-                    arrow = "▲"
-                elif diff < 0:
-                    color = "#1971c2"
-                    arrow = "▼"
+                # 상승/하락에 따른 색상 설정
+                if change_val > 0:
+                    text_clr = "#e03131" # 빨간색
+                    icon = "▲"
+                elif change_val < 0:
+                    text_clr = "#1971c2" # 파란색
+                    icon = "▼"
                 else:
-                    color = "#495057"
-                    arrow = "-"
+                    text_clr = "#495057" # 회색
+                    icon = "-"
                 
-                with cols[i]:
+                with market_cols[i]:
                     st.markdown(f"""
                         <div class="index-card">
                             <div class="index-name">{name}</div>
-                            <div class="index-value" style="color:{color};">{curr:,.2f}</div>
-                            <div class="index-change" style="color:{color};">{arrow} {abs(diff):,.2f} ({rate:+.2f}%)</div>
+                            <div class="index-value" style="color:{text_clr};">{current_val:,.2f}</div>
+                            <div class="index-change" style="color:{text_clr};">
+                                {icon} {abs(change_val):,.2f} ({change_pct:+.2f}%)
+                            </div>
                         </div>
                     """, unsafe_allow_html=True)
-    except Exception:
-        st.caption("시장 지수 데이터를 불러오고 있습니다...")
+    except Exception as e:
+        st.caption(f"시장 데이터 로드 오류: {e}")
 
-# --- 데이터 관리 ---
-WATCHLIST_FILE = "watchlist.json"
-PORTFOLIO_FILE = "portfolio.json"
-JOURNAL_FILE = "trading_journal.csv"
+# --- 파일 관리 시스템 ---
+# 사용자 데이터를 로컬 파일에 저장하고 불러오는 함수들입니다.
 
-def load_watchlist():
-    if os.path.exists(WATCHLIST_FILE):
+WATCHLIST_PATH = "leo_user_watchlist.json"
+PORTFOLIO_PATH = "leo_user_portfolio.json"
+JOURNAL_PATH = "leo_user_journal.csv"
+
+def get_watchlist():
+    """저장된 관심종목 폴더를 불러옵니다."""
+    if os.path.exists(WATCHLIST_PATH):
         try:
-            with open(WATCHLIST_FILE, 'r', encoding='utf-8') as f:
+            with open(WATCHLIST_PATH, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except:
-            pass
+            return {"관심종목1": [], "관심종목2": [], "관심종목3": []}
     return {"관심종목1": [], "관심종목2": [], "관심종목3": []}
 
-def save_watchlist(data):
-    with open(WATCHLIST_FILE, 'w', encoding='utf-8') as f:
+def save_watchlist_to_file(data):
+    """관심종목 폴더를 파일에 저장합니다."""
+    with open(WATCHLIST_PATH, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-def load_portfolio():
-    if os.path.exists(PORTFOLIO_FILE):
+def get_portfolio():
+    """보유 종목 리스트를 불러옵니다."""
+    if os.path.exists(PORTFOLIO_PATH):
         try:
-            with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f:
+            with open(PORTFOLIO_PATH, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except:
-            pass
-    return {} 
+            return {}
+    return {}
 
-def save_portfolio(data):
-    with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f:
+def save_portfolio_to_file(data):
+    """보유 종목 리스트를 파일에 저장합니다."""
+    with open(PORTFOLIO_PATH, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-def load_journal():
-    if os.path.exists(JOURNAL_FILE):
+def get_journal_data():
+    """매매 일지 데이터를 불러옵니다."""
+    if os.path.exists(JOURNAL_PATH):
         try:
-            return pd.read_csv(JOURNAL_FILE)
+            return pd.read_csv(JOURNAL_PATH)
         except:
             pass
-    cols = [
-        "발굴일자", "종목명", "시장국면", "비중", "허용진입가", 
-        "실제진입일", "실제매수가", "갭통과", "손절가", "익절가", 
-        "매도일자", "실제매도가", "청산사유", "수익률(%)", "실현손익", 
-        "원칙준수", "복기_피드백"
-    ]
+    
+    # 파일이 없거나 오류 시 빈 데이터프레임 생성
+    cols = ["발굴일자", "종목명", "시장국면", "비중", "허용진입가", "실제진입일", "실제매수가", "손절가", "익절가", "청산사유", "수익률(%)"]
     return pd.DataFrame(columns=cols)
 
+# --- 종목 마스터 데이터 관리 ---
+
 @st.cache_data
-def load_stock_list():
+def get_krx_stock_master():
+    """KRX 전체 종목 리스트를 캐시하여 로드합니다."""
     if os.path.exists('krx_stocks.csv'):
-        df = pd.read_csv('krx_stocks.csv')
-        df['Code'] = df['Code'].astype(str).str.zfill(6)
-        df['Display'] = df['Name'] + " (" + df['Code'] + ")"
-        return df
+        master_df = pd.read_csv('krx_stocks.csv')
+        master_df['Code'] = master_df['Code'].astype(str).str.zfill(6)
+        master_df['Display'] = master_df['Name'] + " (" + master_df['Code'] + ")"
+        return master_df
+    # 파일이 없을 경우 최소한의 샘플 데이터 반환
     return pd.DataFrame([{'Code': '005930', 'Name': '삼성전자', 'Market': 'KOSPI', 'Display': '삼성전자 (005930)'}])
 
-df_krx = load_stock_list()
+df_krx_master = get_krx_stock_master()
 
 @st.cache_data(ttl=3600)
-def get_detailed_info(symbol):
+def fetch_stock_meta_info(stock_symbol):
+    """야후 파이낸스에서 종목의 상세 정보(시총, PER 등)를 가져옵니다."""
     try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info if ticker.info else {}
-        if not info or 'marketCap' not in info:
-            f_info = ticker.fast_info
-            info['marketCap'] = getattr(f_info, 'market_cap', 0)
-            info['regularMarketPreviousClose'] = getattr(f_info, 'previous_close', 0)
-            info['fiftyTwoWeekHigh'] = getattr(f_info, 'year_high', None)
-            info['fiftyTwoWeekLow'] = getattr(f_info, 'year_low', None)
-        return info
+        ticker_obj = yf.Ticker(stock_symbol)
+        meta = ticker_obj.info
+        
+        # 일반적인 info 데이터가 비어있을 경우 대비
+        if not meta or 'marketCap' not in meta:
+            fast = ticker_obj.fast_info
+            meta = {
+                'marketCap': getattr(fast, 'market_cap', 0),
+                'regularMarketPreviousClose': getattr(fast, 'previous_close', 0),
+                'fiftyTwoWeekHigh': getattr(fast, 'year_high', 0),
+                'fiftyTwoWeekLow': getattr(fast, 'year_low', 0),
+                'trailingPE': getattr(ticker_obj.info, 'trailingPE', None),
+                'priceToBook': getattr(ticker_obj.info, 'priceToBook', None)
+            }
+        return meta
     except:
         return {}
 
 @st.cache_data(ttl=3600)
-def get_kospi_filter():
+def check_global_market_regime():
+    """코스피 지수를 분석하여 현재 시장이 대세 하락장인지 판별합니다."""
     try:
-        kospi = yf.download("^KS11", period="3y", interval="1d", progress=False)
-        if isinstance(kospi.columns, pd.MultiIndex):
-            kospi.columns = kospi.columns.get_level_values(0)
+        # 코스피 데이터 3년치 분석
+        kospi_history = yf.download("^KS11", period="3y", interval="1d", progress=False)
+        if isinstance(kospi_history.columns, pd.MultiIndex):
+            kospi_history.columns = kospi_history.columns.get_level_values(0)
             
-        kospi['MA60'] = ta.sma(kospi['Close'], length=60)
-        kospi['ATR'] = ta.atr(kospi['High'], kospi['Low'], kospi['Close'], length=14)
-        kospi['Volatility'] = kospi['ATR'] / kospi['Close']
-        kospi['MA60_Slope'] = kospi['MA60'].diff(5)
+        # 60일 이동평균선(MA60) 및 기울기
+        kospi_history['MA60'] = ta.sma(kospi_history['Close'], length=60)
+        kospi_history['Slope'] = kospi_history['MA60'].diff(5)
         
-        cond_up = (kospi['Close'] > kospi['MA60']) & (kospi['MA60_Slope'] > 0)
-        cond_down = kospi['Close'] < kospi['MA60']
+        last_price = kospi_history['Close'].iloc[-1]
+        last_ma60 = kospi_history['MA60'].iloc[-1]
+        last_slope = kospi_history['Slope'].iloc[-1]
         
-        kospi['Global_Mode'] = np.select(
-            [cond_up, cond_down], 
-            ["UPTREND", "DOWNTREND"], 
-            default="SIDEWAYS"
-        )
-        return kospi[['Global_Mode']]
-    except:
-        return pd.DataFrame()
-
-def move_to_detail(stock_display):
-    st.session_state.current_selection = stock_display
-    st.session_state.page_selection = "📊 단일 종목 분석"
-
-if 'current_selection' not in st.session_state: 
-    st.session_state.current_selection = df_krx['Display'].iloc[0]
-if 'page_selection' not in st.session_state: 
-    st.session_state.page_selection = "📊 단일 종목 분석"
-if 'search_results' not in st.session_state: 
-    st.session_state.search_results = []
-
-# --- V3.1 타점 엔진 ---
-def analyze_sniper_backtest(symbol, fee_rate):
-    try:
-        df = yf.download(symbol, period="3y", interval="1d", progress=False) 
-        if df.empty or len(df) < 60: 
-            return None, "에러", 0, 0, 0, 0, None, 0, 0, 0, None, 0
-            
-        if isinstance(df.columns, pd.MultiIndex): 
-            df.columns = df.columns.get_level_values(0)
-        df = df.ffill().dropna()
-
-        kospi_df = get_kospi_filter()
-        if not kospi_df.empty:
-            df['Global_Mode'] = df.join(kospi_df, how='left')['Global_Mode'].ffill().fillna("SIDEWAYS")
+        # 상태 판별 로직
+        if (last_price > last_ma60) and (last_slope > 0):
+            return "UPTREND"
+        elif last_price < last_ma60:
+            return "DOWNTREND"
         else:
-            df['Global_Mode'] = "SIDEWAYS"
+            return "SIDEWAYS"
+    except:
+        return "SIDEWAYS"
 
-        df['MA_S'] = ta.sma(df['Close'], length=5)
-        df['MA_L'] = ta.sma(df['Close'], length=20)
-        df['MA_20'] = df['MA_L']
-        df['MA60'] = ta.sma(df['Close'], length=60)
-        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-        df['Volatility'] = df['ATR'] / df['Close']
-        df['MA60_Slope'] = df['MA60'].diff(5)
+# ==========================================================
+# --- [섹션 3] 퀀트 분석 핵심 엔진 (V3.1 로직 정석 구현) ---
+# ==========================================================
+
+def execute_quant_logic(symbol_string, fee_rate=0.002):
+    """
+    특정 종목에 대해 3년 백테스팅 및 현재 타점을 계산합니다.
+    입력: 종목 티커 (예: 005930.KS)
+    출력: 성적표(CAGR, MDD, 승률, 존버 등), 현재 상태, 권장 비중 등
+    """
+    try:
+        # 1. 역사 데이터 수집 (3년 일봉)
+        stock_df = yf.download(symbol_string, period="3y", interval="1d", progress=False)
         
-        cond_up = (df['Close'] > df['MA60']) & (df['MA60_Slope'] > 0) & (df['Volatility'] < 0.03)
-        cond_vol_up = (df['Close'] > df['MA60']) & (df['MA60_Slope'] > 0) & (df['Volatility'] >= 0.03)
-        cond_side = (abs(df['Close'] - df['MA60']) / df['MA60'] < 0.02)
-        cond_down = ~(cond_up | cond_vol_up | cond_side)
+        # 데이터가 너무 적으면 분석 불가
+        if stock_df.empty or len(stock_df) < 120:
+            return None, "데이터 부족", 0, 0, 0, 0, 0, 0, "NONE", 0, 0, 0
+            
+        # 멀티인덱스 컬럼 정리
+        if isinstance(stock_df.columns, pd.MultiIndex):
+            stock_df.columns = stock_df.columns.get_level_values(0)
+        
+        # 결측치 처리
+        stock_df = stock_df.ffill().dropna()
 
-        df['Market_Mode'] = np.select(
-            [cond_up, cond_vol_up, cond_side, cond_down], 
-            ["UPTREND", "VOLATILE_UP", "SIDEWAYS", "DOWNTREND"], 
+        # 2. 기술적 지표 산출
+        # 단기(5일), 중기(20일), 장기(60일) 이평선
+        stock_df['MA5'] = ta.sma(stock_df['Close'], length=5)
+        stock_df['MA20'] = ta.sma(stock_df['Close'], length=20)
+        stock_df['MA60'] = ta.sma(stock_df['Close'], length=60)
+        stock_df['MA60_Slope'] = stock_df['MA60'].diff(5)
+        
+        # 변동성 및 자금 지표
+        stock_df['ATR'] = ta.atr(stock_df['High'], stock_df['Low'], stock_df['Close'], length=14)
+        stock_df['Vol_MA20'] = ta.sma(stock_df['Volume'], length=20)
+        
+        # MACD 및 MFI
+        macd_output = ta.macd(stock_df['Close'])
+        stock_df['MACD_Line'] = macd_output.iloc[:, 0]
+        stock_df['MACD_Signal'] = macd_output.iloc[:, 2]
+        stock_df['MFI_Index'] = ta.mfi(stock_df['High'], stock_df['Low'], stock_df['Close'], stock_df['Volume'], length=14)
+        
+        # 3. 개별 종목 국면 정의 (Regime Detection)
+        stock_df['Volatility_Rate'] = stock_df['ATR'] / stock_df['Close']
+        
+        # 상승, 변동성상승, 횡보, 하락 판별
+        cond_up = (stock_df['Close'] > stock_df['MA60']) & (stock_df['MA60_Slope'] > 0) & (stock_df['Volatility_Rate'] < 0.03)
+        cond_vol = (stock_df['Close'] > stock_df['MA60']) & (stock_df['MA60_Slope'] > 0) & (stock_df['Volatility_Rate'] >= 0.03)
+        cond_side = (abs(stock_df['Close'] - stock_df['MA60']) / stock_df['MA60'] < 0.02)
+        
+        stock_df['Local_Mode'] = np.select(
+            [cond_up, cond_vol, cond_side], 
+            ["UPTREND", "VOLATILE_UP", "SIDEWAYS"], 
             default="DOWNTREND"
         )
+
+        # 4. 타점 점수(Total Score) 계산 (9점 만점)
+        # 이평선 정배열(3점) + MACD 반전(2점) + 거래량 폭증(2점) + 자금유입(2점)
+        sc_ma = np.where(stock_df['MA5'] > stock_df['MA20'], 3, 0)
+        sc_macd = np.where(stock_df['MACD_Line'] > stock_df['MACD_Signal'], 2, 0)
+        sc_vol = np.where((stock_df['Volume'] > stock_df['Vol_MA20'] * 1.2) & (stock_df['Close'] > stock_df['Open']), 2, 0)
+        sc_mfi = np.where(stock_df['MFI_Index'] > 50, 2, 0)
         
-        df['Target_Score'] = np.select(
-            [df['Market_Mode'] == "UPTREND", df['Market_Mode'] == "SIDEWAYS", df['Market_Mode'] == "VOLATILE_UP", df['Market_Mode'] == "DOWNTREND"], 
-            [3, 4, 6, 6], 
+        stock_df['Final_Score'] = sc_ma + sc_macd + sc_vol + sc_mfi
+        
+        # 국면별 진입 커트라인 점수 설정
+        stock_df['Cutline_Score'] = np.select(
+            [stock_df['Local_Mode'] == "UPTREND", stock_df['Local_Mode'] == "SIDEWAYS"], 
+            [3, 4], 
             default=6
         )
-        
-        df['ATR_SL_Mult'] = np.select(
-            [df['Market_Mode'] == "UPTREND", df['Market_Mode'] == "SIDEWAYS", df['Market_Mode'] == "VOLATILE_UP", df['Market_Mode'] == "DOWNTREND"], 
-            [2.5, 1.5, 2.0, 1.2], 
-            default=1.5
-        )
-        
-        df['ATR_TP_Mult'] = np.select(
-            [df['Market_Mode'] == "UPTREND", df['Market_Mode'] == "SIDEWAYS", df['Market_Mode'] == "VOLATILE_UP", df['Market_Mode'] == "DOWNTREND"], 
-            [4.0, 2.0, 3.0, 2.0], 
-            default=2.5
-        )
 
-        df['Vol_MA'] = ta.sma(df['Volume'], length=20)
-        macd_calc = ta.macd(df['Close'])
-        df['MACD_Line'] = macd_calc.iloc[:, 0]
-        df['MACD_Signal'] = macd_calc.iloc[:, 2]
-        df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
-        
-        score_ma = np.where(df['MA_S'] > df['MA_L'], 3, 0)
-        score_macd = np.where(df['MACD_Line'] > df['MACD_Signal'], 2, 0)
-        score_vol = np.where((df['Volume'] > df['Vol_MA'] * 1.2) & (df['Close'] > df['Open']), 2, 0) 
-        score_mfi = np.where(df['MFI'] > 50, 2, 0)
-        
-        df['Total_Score'] = score_ma + score_macd + score_vol + score_mfi
-        
-        cond_score = df['Total_Score'] >= df['Target_Score']
-        cond_pullback = df['Close'] < (df['MA_S'] * 1.05)
-        cond_overheat = df['Close'].pct_change(10) < 0.30
-        cond_trigger = (df['Close'] > df['Close'].shift(1)) | (df['Close'] > df['Open']) 
-        cond_allow_local = df['Market_Mode'] != "VOLATILE_UP"
-        cond_allow_global = df['Global_Mode'] != "DOWNTREND" 
-        
-        df['Buy_Signal'] = cond_score & cond_pullback & cond_overheat & cond_trigger & cond_allow_local & cond_allow_global
+        # 5. 매수 신호(Buy Signal) 결정 로직
+        # 시장 국면 필터 적용 (하락장 시 매수 금지)
+        global_market_mode = check_global_market_regime()
 
-        positions = np.zeros(len(df))
-        trade_actions = np.zeros(len(df))
-        strategy_returns = np.zeros(len(df))
+        stock_df['Buy_Signal'] = (stock_df['Final_Score'] >= stock_df['Cutline_Score']) & \
+                                 (stock_df['Close'] < stock_df['MA5'] * 1.05) & \
+                                 (stock_df['Local_Mode'] != "VOLATILE_UP") & \
+                                 (global_market_mode != "DOWNTREND")
+
+        # 6. 백테스팅(Backtesting) 시뮬레이션
+        # 3년 전체가 아닌 최근 1년(250거래일)을 집중 분석
         
-        in_position = False
-        total_trades = 0
-        winning_trades = 0
-        entry_price = 0.0
-        sl_price = 0.0
-        tp_price = 0.0
-        current_position_size = 0.0
+        pos_array = np.zeros(len(stock_df))
+        strategy_return_array = np.zeros(len(stock_df))
+        is_in_position = False
+        trade_count = 0
+        win_count = 0
+        entry_price_val = 0
+        stop_loss_val = 0
+        take_profit_val = 0
+        pos_size = 0
         
-        closes = df['Close'].values
-        opens = df['Open'].values
-        highs = df['High'].values
-        lows = df['Low'].values
-        ma20s = df['MA_20'].values
-        atrs = df['ATR'].values
-        buy_signals = df['Buy_Signal'].values
-        sl_mults = df['ATR_SL_Mult'].values
-        tp_mults = df['ATR_TP_Mult'].values
+        # 루프를 돌며 가상 매매 시뮬레이션
+        close_vals = stock_df['Close'].values
+        open_vals = stock_df['Open'].values
+        high_vals = stock_df['High'].values
+        low_vals = stock_df['Low'].values
         
-        for i in range(1, len(df)):
-            if not in_position:
-                if buy_signals[i-1]: 
-                    gap = (opens[i] / closes[i-1]) - 1 if closes[i-1] > 0 else 0
-                    if -0.03 <= gap <= 0.03:
-                        in_position = True
-                        entry_price = opens[i] 
-                        sl_price = entry_price - (atrs[i-1] * sl_mults[i-1])
-                        tp_price = entry_price + (atrs[i-1] * tp_mults[i-1])
-                        risk_per_share = entry_price - sl_price
+        for i in range(1, len(stock_df)):
+            if not is_in_position:
+                # 매수 신호 포착 (전일 신호 발생 시 금일 시가 진입)
+                if stock_df['Buy_Signal'].iloc[i-1]:
+                    # 갭 통과 확인 (±3% 이내)
+                    gap_pct = (open_vals[i] / close_vals[i-1]) - 1
+                    if -0.03 <= gap_pct <= 0.03:
+                        is_in_position = True
+                        entry_price_val = open_vals[i]
+                        trade_count += 1
                         
-                        if risk_per_share > 0:
-                            current_position_size = min(0.01 / (risk_per_share / entry_price), 1.0)
-                        else:
-                            current_position_size = 1.0
-                            
-                        positions[i] = 1
-                        trade_actions[i] = 1
-                        total_trades += 1
+                        # ATR 기반 손절/익절가 세팅
+                        current_atr = stock_df['ATR'].iloc[i-1]
+                        stop_loss_val = entry_price_val - (current_atr * 2.0)
+                        take_profit_val = entry_price_val + (current_atr * 3.5)
+                        
+                        # 리스크 기반 비중 조절
+                        unit_risk = (entry_price_val - stop_loss_val) / entry_price_val
+                        pos_size = min(0.01 / unit_risk, 1.0) if unit_risk > 0 else 1.0
+                        pos_array[i] = 1
             else:
-                exit_price = None
-                if lows[i] <= sl_price:
-                    exit_price = sl_price
-                elif highs[i] >= tp_price:
-                    exit_price = tp_price
-                elif closes[i] < ma20s[i-1]:
-                    exit_price = closes[i]
-                    
-                if exit_price is not None:
-                    in_position = False
-                    positions[i] = 0
-                    trade_actions[i] = -1 
-                    if exit_price > entry_price:
-                        winning_trades += 1
-                else:
-                    positions[i] = 1
-                    trade_actions[i] = 0
-            
-            if closes[i-1] > 0:
-                if trade_actions[i] == -1 and exit_price is not None:
-                    strategy_returns[i] = current_position_size * ((exit_price - closes[i-1]) / closes[i-1])
-                else:
-                    strategy_returns[i] = current_position_size * (positions[i-1] * (closes[i] - closes[i-1]) / closes[i-1])
-                    
-            if trade_actions[i] == 1:
-                strategy_returns[i] = 0
+                # 매도 조건 확인
+                final_exit_price = None
                 
-            if trade_actions[i] != 0:
-                strategy_returns[i] -= (fee_rate / 2) * current_position_size
+                # 시나리오 1: 손절가 터치
+                if low_vals[i] <= stop_loss_val:
+                    final_exit_price = stop_loss_val
+                    is_in_position = False
+                # 시나리오 2: 익절가 터치
+                elif high_vals[i] >= take_profit_val:
+                    final_exit_price = take_profit_val
+                    is_in_position = False
+                    win_count += 1
+                # 시나리오 3: 20일 이평선 이탈 (추세 이탈)
+                elif close_vals[i] < stock_df['MA20'].iloc[i-1]:
+                    final_exit_price = close_vals[i]
+                    is_in_position = False
+                    if final_exit_price > entry_price_val:
+                        win_count += 1
+                else:
+                    pos_array[i] = 1
                 
-        df['Position'] = positions
-        df['Trade_Action'] = trade_actions
-        df['Strategy_Return'] = strategy_returns
-        
-        df_1y = df.iloc[-250:].copy()
-        
-        cum_ret = (1 + df_1y['Strategy_Return']).cumprod()
-        running_max = cum_ret.cummax()
-        mdd = ((cum_ret - running_max) / running_max).min()
-        cagr = (cum_ret.iloc[-1] ** (252 / len(df_1y))) - 1 if cum_ret.iloc[-1] > 0 and len(df_1y) > 0 else 0
-        win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
-        b_profit = (df_1y['Close'].iloc[-1] / df_1y['Close'].iloc[0]) - 1 if len(df_1y) > 0 else 0
-        
-        last = df.iloc[-1]
-        
-        if df['Buy_Signal'].iloc[-1]:
-            status = "🔥 강력 매수 대기"
-        elif last['Position'] == 1:
-            status = "🛡️ 보유자 영역 (Hold)"
-        else:
-            status = "👀 관망"
-            
-        curr_risk_pct = (last['ATR'] * last['ATR_SL_Mult']) / df['Close'].iloc[-1]
-        rec_weight = min(0.01 / curr_risk_pct, 1.0) if curr_risk_pct > 0 else 1.0
-        
-        return df_1y, status, cagr, mdd, win_rate, b_profit, last['Total_Score'], last['Target_Score'], last['Market_Mode'], last['ATR'], None, rec_weight
-    except:
-        return None, "에러", 0, 0, 0, 0, None, 0, 0, 0, None, 0
+                # 수익률 기록
+                if not is_in_position:
+                    # 매도 시점 수익률 (수수료 차감)
+                    strategy_return_array[i] = pos_size * ((final_exit_price / close_vals[i-1]) - 1 - fee_rate)
+                else:
+                    # 보유 시점 수익률
+                    strategy_return_array[i] = pos_size * ((close_vals[i] / close_vals[i-1]) - 1)
 
-# ====== [메인 화면 UI] ======
-display_market_indices() 
+        # 7. 성적표 도출 (최근 1년 기준)
+        stock_df_1y = stock_df.iloc[-250:].copy()
+        strat_returns_1y = strategy_return_array[-250:]
+        
+        # 누적 수익률 계산
+        stock_df_1y['Strat_Cumulative'] = (1 + strat_returns_1y).cumprod()
+        
+        # 최종 지표 계산
+        final_cum_val = stock_df_1y['Strat_Cumulative'].iloc[-1] if not stock_df_1y.empty else 1.0
+        cagr_val = (final_cum_val ** (252/250)) - 1
+        
+        # MDD 계산
+        running_max_vals = stock_df_1y['Strat_Cumulative'].cummax()
+        drawdown_vals = (stock_df_1y['Strat_Cumulative'] - running_max_vals) / running_max_vals
+        mdd_val = drawdown_vals.min()
+        
+        # 승률 및 존버 수익률
+        win_rate_val = (win_count / trade_count * 100) if trade_count > 0 else 0
+        buy_and_hold_val = (close_vals[-1] / close_vals[-250]) - 1 if len(close_vals) >= 250 else 0
+        
+        # 현재 상태 정보
+        last_row = stock_df.iloc[-1]
+        current_status_text = "🔥 강력 매수 대기" if last_row['Buy_Signal'] else ("🛡️ 보유중 (Hold)" if is_in_position else "👀 관망")
+        
+        # 권장 투자 비중
+        last_atr = last_row['ATR']
+        recommended_weight_val = min(0.01 / ((last_atr * 2.0) / last_row['Close']), 1.0) if last_row['Close'] > 0 else 0
+        
+        return (
+            stock_df_1y,           # 1년 데이터프레임
+            current_status_text,   # 현재 상태
+            cagr_val,             # 연복리 수익률
+            mdd_val,              # 최대 낙폭
+            win_rate_val,         # 승률
+            buy_and_hold_val,     # 존버 수익률
+            last_row['Final_Score'], # 현재 점수
+            last_row['Cutline_Score'], # 기준 점수
+            last_row['Local_Mode'],   # 국면
+            last_atr,             # 변동성
+            is_in_position,       # 보유 여부
+            recommended_weight_val # 권장 비중
+        )
+    except Exception as general_error:
+        print(f"Error in execution: {general_error}")
+        return None, f"오류 발생: {general_error}", 0, 0, 0, 0, 0, 0, "NONE", 0, False, 0
+
+# ==========================================================
+# --- [섹션 4] 메뉴별 화면 렌더링 함수 (1~6번 메뉴 풀버전) ---
+# ==========================================================
+
+# --- 메뉴 1: 단일 종목 분석 화면 ---
+
+def render_page_stock_detail():
+    st.markdown("### 📊 종목 정밀 타점 분석기")
+    
+    # 1. 종목 선택
+    stock_names = df_krx_master['Display'].tolist()
+    user_choice = st.selectbox(
+        "분석할 특정 종목을 입력하거나 선택하세요", 
+        options=stock_names, 
+        index=stock_names.index(st.session_state.current_selection) if st.session_state.current_selection in stock_names else 0
+    )
+    
+    # 선택 변경 시 화면 갱신
+    if user_choice != st.session_state.current_selection:
+        st.session_state.current_selection = user_choice
+        st.rerun()
+
+    # 종목 코드 추출
+    selected_row = df_krx_master[df_krx_master['Display'] == user_choice].iloc[0]
+    full_ticker = f"{selected_row['Code']}.KS" if selected_row['Market'] == 'KOSPI' else f"{selected_row['Code']}.KQ"
+
+    # 2. 퀀트 분석 실행
+    with st.spinner(f"[{selected_row['Name']}] 3년치 빅데이터 분석 및 시뮬레이션 가동 중..."):
+        df_1y, status, cagr, mdd, win, hold, score, cut, mode, atr, _, weight = execute_quant_logic(full_ticker)
+        meta_info = fetch_stock_meta_info(full_ticker)
+
+    # 3. 화면 UI 구성
+    if df_1y is not None:
+        curr_price = df_1y['Close'].iloc[-1]
+        prev_price = meta_info.get('regularMarketPreviousClose', df_1y['Close'].iloc[-2])
+        diff_val = curr_price - prev_price
+        diff_pct = (diff_val / prev_price) * 100
+        
+        # 가격 색상 및 아이콘
+        text_clr = "#e03131" if diff_val > 0 else ("#1971c2" if diff_val < 0 else "#212529")
+        icon_mark = "▲" if diff_val > 0 else ("▼" if diff_val < 0 else "-")
+
+        # [메인 종목 카드]
+        st.markdown(f"""
+        <div style='background-color:#ffffff; padding:25px; border-radius:18px; border:2px solid #e9ecef; margin-bottom:20px;'>
+            <div style='margin-bottom:15px;'>
+                <span class='market-badge'>종목 국면: {mode}</span>
+                <span class='weight-badge'>⚖️ 권장 투자 비중: {weight*100:.0f}%</span>
+                <span class='stop-loss-badge'>🛡️ 자동 손절 가격: {curr_price - (atr*2.0):,.0f}원</span>
+                <span class='take-profit-badge'>🚀 자동 익절 가격: {curr_price + (atr*3.5):,.0f}원</span>
+            </div>
+            <div style='display:flex; align-items:baseline; gap:20px;'>
+                <span style='font-size:2.3rem; font-weight:bold;'>{selected_row['Name']}</span>
+                <span style='font-size:3.8rem; font-weight:bold; color:{text_clr};'>{curr_price:,.0f}원</span>
+                <span style='font-size:1.8rem; font-weight:bold; color:{text_clr};'>{icon_mark} {abs(diff_val):,.0f} ({diff_pct:+.2f}%)</span>
+            </div>
+            <div style='margin-top:20px; border-top:1px solid #eee; padding-top:15px; display:flex; gap:40px; color:#495057;'>
+                <div><small>시가총액</small><br><b>{meta_info.get('marketCap',0)/1e12:.2f}조원</b></div>
+                <div><small>52주 최고</small><br><b style='color:#e03131;'>{meta_info.get('fiftyTwoWeekHigh',0):,.0f}원</b></div>
+                <div><small>52주 최저</small><br><b style='color:#1971c2;'>{meta_info.get('fiftyTwoWeekLow',0):,.0f}원</b></div>
+                <div><small>PER</small><br><b>{meta_info.get('trailingPE',0) if meta_info.get('trailingPE') else 0:.1f}배</b></div>
+                <div><small>PBR</small><br><b>{meta_info.get('priceToBook',0) if meta_info.get('priceToBook') else 0:.1f}배</b></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # [최근 1년 백테스팅 성적표 - 복구 완료]
+        st.markdown(f"""
+        <div style='display:flex; gap:15px; margin-bottom:20px;'>
+            <div class='stat-box'><div class='stat-label'>연복리 수익률(CAGR)</div><div class='stat-value' style='color:#e03131;'>{cagr*100:+.1f}%</div></div>
+            <div class='stat-box'><div class='stat-label'>최대 낙폭(MDD)</div><div class='stat-value' style='color:#1971c2;'>{mdd*100:.1f}%</div></div>
+            <div class='stat-box'><div class='stat-label'>전략 승률</div><div class='stat-value'>{win:.1f}%</div></div>
+            <div class='stat-box'><div class='stat-label'>존버 수익률(1년)</div><div class='stat-value' style='color:{"#e03131" if hold > 0 else "#1971c2"};'>{hold*100:+.1f}%</div></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # [현재 시그널 판정]
+        box_style = "status-buy" if "매수" in status else ("status-hold" if "보유" in status else "status-wait")
+        final_msg = f"{status} (알고리즘 점수: {score}점 / 진입 기준: {cut}점)"
+        
+        if "매수" in status:
+            final_msg += f"<br><small style='font-weight:normal;'>👉 내일 시가 진입 허용 구간: <b>{curr_price*0.97:,.0f}원 ~ {curr_price*1.03:,.0f}원</b> (±3% 이내)</small>"
+        
+        st.markdown(f"<div class='signal-box {box_style}'>{final_msg}</div>", unsafe_allow_html=True)
+        
+        # 차트 출력
+        st.line_chart(df_1y[['Close', 'MA5', 'MA20']], height=450)
+
+        # 관심종목 저장 기능
+        st.divider()
+        col_folder, col_btn = st.columns([3, 1])
+        target_folder = col_folder.selectbox("이 종목을 관심 폴더에 저장할까요?", ["관심종목1", "관심종목2", "관심종목3"], label_visibility="collapsed")
+        if col_btn.button("⭐ 현재 종목 폴더 저장", use_container_width=True):
+            current_wl = get_watchlist()
+            if selected_row['Code'] not in current_wl[target_folder]:
+                current_wl[target_folder].append(selected_row['Code'])
+                save_watchlist_to_file(current_wl)
+                st.toast(f"✅ {selected_row['Name']}이 {target_folder}에 추가되었습니다!")
+
+# --- 메뉴 2: 조건 검색기 (스크리너) 화면 ---
+
+def render_page_screener():
+    st.title("🔍 실전 퀀트 종목 스캐너")
+    st.info("시장에 등록된 전 종목을 실시간 퀀트 알고리즘으로 스캔하여 '강력 매수' 타점 종목을 찾아냅니다.")
+    
+    st.divider()
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        scan_mode = st.radio("검색 대상 설정", ["전체 시장 (순위별 100개)", "⭐ 관심종목 폴더 스캔"], horizontal=True)
+    with c2:
+        if scan_mode == "전체 시장 (순위별 100개)":
+            rank_range = st.selectbox("시가총액 순위 범위", [f"{i*100 + 1}위 ~ {(i+1)*100}위" for i in range(15)])
+    
+    if st.button("🚀 알고리즘 스캔 시작 (300년 치 데이터 연산)", type="primary", use_container_width=True):
+        if scan_mode == "전체 시장 (순위별 100개)":
+            start_num = int(rank_range.split("위")[0].strip()) - 1
+            target_list = df_krx_master.iloc[start_num : start_num + 100]
+        else:
+            wl_data = get_watchlist()
+            merged_codes = list(set(wl_data["관심종목1"] + wl_data["관심종목2"] + wl_data["관심종목3"]))
+            target_list = df_krx_master[df_krx_master['Code'].isin(merged_codes)]
+            
+        if target_list.empty:
+            st.warning("검색할 종목이 없습니다. 폴더에 종목을 먼저 추가해 주세요.")
+        else:
+            prog_bar = st.progress(0, text="대규모 퀀트 데이터 연산 중...")
+            screener_results = []
+            
+            for index_num, (idx, row) in enumerate(target_list.iterrows()):
+                ticker_full = f"{row['Code']}.KS" if row['Market'] == 'KOSPI' else f"{row['Code']}.KQ"
+                res_data = execute_quant_logic(ticker_full)
+                
+                if res_data[0] is not None:
+                    screener_results.append({
+                        'Name': row['Name'],
+                        'Code': row['Code'],
+                        'Display': row['Display'],
+                        'Status': res_data[1],
+                        'Score': res_data[6],
+                        'Weight': round(res_data[11] * 100),
+                        'CAGR': res_data[2]
+                    })
+                prog_bar.progress((index_num + 1) / len(target_list))
+            
+            prog_bar.empty()
+            # 정렬 로직: 매수 신호 우선 -> 점수 순 -> 수익률 순
+            st.session_state.search_results = sorted(
+                screener_results, 
+                key=lambda x: (0 if "강력" in x['Status'] else 1, -x['Score'], -x['CAGR'])
+            )[:12]
+
+    # 결과 리스트 출력
+    if st.session_state.search_results:
+        st.subheader("🏆 금일의 알고리즘 TOP 픽")
+        for item in st.session_state.search_results:
+            card_col, btn_col, add_col = st.columns([4, 1, 1.5])
+            
+            with card_col:
+                st.markdown(f"""
+                <div class='rank-card'>
+                    <div style='display:flex; justify-content:space-between; align-items:center;'>
+                        <span style='font-size:1.1rem;'><b>{item['Name']} ({item['Code']})</b></span>
+                        <span style='color:#2b8a3e; font-weight:bold;'>{item['Status']}</span>
+                    </div>
+                    <div style='font-size:0.9rem; color:#666; margin-top:8px;'>
+                        알고리즘 점수: {item['Score']}점 | 권장 투자 비중: {item['Weight']}% | 예상 연수익률: {item['CAGR']*100:+.1f}%
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with btn_col:
+                st.write("") # 패딩용
+                if st.button("상세분석", key=f"scr_det_{item['Code']}", use_container_width=True):
+                    st.session_state.current_selection = item['Display']
+                    st.session_state.page_selection = "📊 단일 종목 분석"
+                    st.rerun()
+            
+            with add_col:
+                st.write("")
+                sc1, sc2 = st.columns([1, 1])
+                f_box = sc1.selectbox("폴더", ["관심종목1", "관심종목2", "관심종목3"], key=f"scr_f_{item['Code']}", label_visibility="collapsed")
+                if sc2.button("⭐", key=f"scr_a_{item['Code']}", use_container_width=True):
+                    wl_save = get_watchlist()
+                    if item['Code'] not in wl_save[f_box]:
+                        wl_save[f_box].append(item['Code'])
+                        save_watchlist_to_file(wl_save)
+                        st.toast(f"{item['Name']} 저장!")
+
+# --- 메뉴 3: 내 계좌 관리 (포트폴리오) 화면 ---
+
+def render_page_portfolio():
+    st.title("💼 실전 보유 종목 관리")
+    st.write("현재 계좌에 담긴 종목들을 퀀트 모델로 추적하여 매도 타이밍을 잡습니다.")
+    
+    my_pf = get_portfolio()
+    
+    # 신규 등록 섹션
+    with st.expander("➕ 보유 종목 수동 등록", expanded=True):
+        p_c1, p_c2, p_c3, p_c4 = st.columns([3, 2, 2, 1])
+        stk_choice = p_c1.selectbox("매수한 종목 선택", options=df_krx_master['Display'].tolist())
+        stk_price = p_c2.number_input("나의 매입 단가(원)", min_value=1, value=50000, step=100)
+        stk_qty = p_c3.number_input("매수 수량(주)", min_value=1, value=10, step=1)
+        
+        if p_c4.button("등록하기", use_container_width=True):
+            stk_code = stk_choice.split("(")[-1].replace(")", "")
+            my_pf[stk_code] = {
+                "Name": stk_choice.split("(")[0].strip(),
+                "BuyPrice": stk_price,
+                "Quantity": stk_qty
+            }
+            save_portfolio_to_file(my_pf)
+            st.success("포트폴리오에 성공적으로 등록되었습니다.")
+            st.rerun()
+
+    st.divider()
+    
+    if not my_pf:
+        st.info("등록된 보유 종목이 없습니다. 위에서 종목을 추가해 주세요.")
+    else:
+        for code_key, p_data in my_pf.items():
+            # 시장 구분 확인
+            full_code = f"{code_key}.KS" if not df_krx_master[df_krx_master['Code']==code_key].empty and df_krx_master[df_krx_master['Code']==code_key]['Market'].iloc[0] == 'KOSPI' else f"{code_key}.KQ"
+            
+            # 분석 데이터 로드
+            p_res = execute_quant_logic(full_code)
+            
+            if p_res[0] is not None:
+                now_price = p_res[0]['Close'].iloc[-1]
+                p_atr = p_res[9]
+                target_tp = p_data['BuyPrice'] + (p_atr * 3.5)
+                target_sl = p_data['BuyPrice'] - (p_atr * 2.0)
+            else:
+                now_price = p_data['BuyPrice']
+                target_tp, target_sl = now_price * 1.15, now_price * 0.95
+                
+            total_profit = (now_price - p_data['BuyPrice']) * p_data['Quantity']
+            profit_rate = (total_profit / (p_data['BuyPrice'] * p_data['Quantity'])) * 100
+            
+            # AI 가이드 메시지
+            if now_price >= target_tp:
+                p_action, p_clr = "🚀 수익 실현 권장", "#5c940d"
+            elif now_price <= target_sl:
+                p_action, p_clr = "⚠️ 리스크 위험! 칼손절 필요", "#e03131"
+            else:
+                p_action, p_clr = "✅ 원칙 홀딩 (관망)", "#2b8a3e"
+            
+            st.markdown(f"""
+            <div class='portfolio-card'>
+                <div style='display:flex; justify-content:space-between; align-items:center;'>
+                    <span style='font-size:1.6rem; font-weight:bold;'>{p_data['Name']} ({code_key})</span>
+                    <span style='color:{p_clr}; font-weight:bold; font-size:1.3rem;'>{p_action}</span>
+                </div>
+                <div style='display:flex; gap:35px; margin-top:18px;'>
+                    <div><small>매입단가</small><br><b>{p_data['BuyPrice']:,.0f}원</b></div>
+                    <div><small>현재가</small><br><b>{now_price:,.0f}원</b></div>
+                    <div><small>평가손익</small><br><b style='color:{"#e03131" if total_profit > 0 else "#1971c2"};'>{total_profit:+,.0f}원 ({profit_rate:+.2f}%)</b></div>
+                    <div><small>목표 익절가</small><br><b style='color:#5c940d;'>{target_tp:,.0f}원</b></div>
+                    <div><small>방어 손절가</small><br><b style='color:#e03131;'>{target_sl:,.0f}원</b></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if st.button("이 종목을 목록에서 제거", key=f"pf_rm_{code_key}"):
+                del my_pf[code_key]
+                save_portfolio_to_file(my_pf)
+                st.rerun()
+
+# --- 메뉴 4: 실전 매매 일지 (저널) 화면 ---
+
+def render_page_journal():
+    st.title("📓 Leo의 실전 매매 기록장")
+    st.write("성공적인 퀀트는 철저한 기록에서 시작됩니다. 감정을 배제하고 원칙 준수 여부를 남기세요.")
+    
+    j_df = get_journal_data()
+    
+    # 스트림릿 데이터 에디터 활용
+    edited_j_df = st.data_editor(
+        j_df,
+        num_rows="dynamic",
+        use_container_width=True,
+        height=600,
+        column_config={
+            "시장국면": st.column_config.SelectboxColumn("📈 국면", options=["상승장", "횡보장", "하락장"]),
+            "청산사유": st.column_config.SelectboxColumn("매도결과", options=["보유중", "목표가 익절", "손절가 손절", "추세이탈 매도", "뇌동매매"])
+        }
+    )
+    
+    if st.button("💾 매매 일지 파일로 저장하기", use_container_width=True, type="primary"):
+        edited_j_df.to_csv(JOURNAL_PATH, index=False, encoding='utf-8-sig')
+        st.success("매매 일지가 CSV 파일로 성공적으로 저장되었습니다.")
+
+# --- 메뉴 5: 관심종목 관리 폴더 화면 ---
+
+def render_page_watchlist():
+    st.title("📂 내 관심종목 폴더 관리")
+    w_data = get_watchlist()
+    
+    fold_col1, fold_col2, fold_col3 = st.columns(3)
+    folder_names = ["관심종목1", "관심종목2", "관심종목3"]
+    cols_list = [fold_col1, fold_col2, fold_col3]
+    
+    for idx_f in range(3):
+        cur_f_name = folder_names[idx_f]
+        with cols_list[idx_f]:
+            st.markdown(f"<div class='folder-box'>", unsafe_allow_html=True)
+            st.subheader(f"📁 {cur_f_name}")
+            saved_codes = w_data.get(cur_f_name, [])
+            
+            if not saved_codes:
+                st.caption("비어 있음 (스캐너에서 추가하세요)")
+            else:
+                for c_item in saved_codes:
+                    # 이름 찾기
+                    found_name = df_krx_master[df_krx_master['Code'] == c_item]['Name'].iloc[0] if not df_krx_master[df_krx_master['Code'] == c_item].empty else c_item
+                    
+                    row_c1, row_c2 = st.columns([4, 1])
+                    row_c1.write(f"**{found_name}** ({c_item})")
+                    if row_c2.button("❌", key=f"wl_del_{cur_f_name}_{c_item}"):
+                        w_data[cur_f_name].remove(c_item)
+                        save_watchlist_to_file(w_data)
+                        st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+# --- 메뉴 6: 퀀트 백과사전 & 매뉴얼 화면 ---
+
+def render_page_manual():
+    st.title("📖 Leo의 퀀트 투자 백과사전")
+    
+    tab_theory, tab_kiwoom = st.tabs(["🧠 퀀트 투자 원칙", "📱 영웅문 실전 매뉴얼"])
+    
+    with tab_theory:
+        st.header("1. ⚖️ 1% 리스크 관리법")
+        st.info("어떤 종목을 사든, '손절가'에 도달했을 때 잃는 돈이 내 전체 투자금의 딱 1%가 되도록 수량을 조절하는 법입니다.")
+        
+        st.header("2. 🤖 시장 국면(Regime) 필터")
+        st.success("코스피가 60일선 아래에 있는 '대세 하락장'에서는 어떤 천재적인 알고리즘 신호가 와도 매수를 쉬는 것이 퀀트의 첫 번째 원칙입니다.")
+        
+        st.header("3. 🧪 백테스팅(Backtesting) 성적표 보는 법")
+        st.markdown("""
+        * **CAGR (연복리 수익률):** 전략이 매년 평균적으로 벌어다 준 수익입니다.
+        * **MDD (최대 낙폭):** 고점 대비 계좌가 가장 많이 깎였던 순간입니다. 이 숫자가 적을수록 맘 편한 투자입니다.
+        * **존버 수익률:** 전략 없이 그냥 1년 전 사서 들고만 있었을 때의 결과입니다. 우리 전략이 이보다 좋아야 합니다.
+        """)
+
+    with tab_kiwoom:
+        st.header("📱 영웅문S# 100% 자동 매매 가이드")
+        
+        st.subheader("☀️ 1단계: 매수 시 (🚨 지정가 함정 매수법)")
+        st.warning("레오님이 발견하신 이 방법은 아침 9시 폭락장을 걸러내는 가장 스마트한 방패입니다.")
+        st.markdown("""
+        1. **메뉴:** [주식] → [주문] → [자동감시주문] → [신규종목]
+        2. **감시 조건:** 현재가 **>=** (이상) 선택 후 프로그램이 준 **'최저가'** 입력
+        3. **주문 설정:** 종류를 반드시 **'보통(지정가)'**로 선택 ★★★
+        4. **주문 가격:** 프로그램이 준 **'최고가'** 입력
+        5. **결과:** 주가가 우리가 원하는 '허용 구간'에 있을 때만 주문이 나갑니다.
+        """)
+        
+        st.subheader("🛡️ 2단계: 매도 시 (잔고편입 스탑로스)")
+        st.markdown("""
+        1. **메뉴:** [자동감시주문] → [잔고편입] 탭 선택
+        2. **대상:** 방금 매수한 종목 선택
+        3. **감시 조건:** 현재가 **'도달 시'** (절대 가격) 선택
+        4. **가격 입력:** 프로그램이 준 **'목표 익절가'**와 **'방어 손절가'** 입력
+        5. **주문 설정:** 매도 종류는 무조건 **'시장가'** 선택 ★★★
+        6. **유효기간:** **90일**로 설정 후 감시 시작 버튼 누르기
+        """)
+
+# ==========================================================
+# --- [섹션 5] 메인 컨트롤러 및 실행부 (최종 마무리) ---
+# ==========================================================
+
+# 상단 지수 띠 출력
+display_market_header()
 st.markdown("<br>", unsafe_allow_html=True)
 
+# 사이드바 메뉴 구성
 with st.sidebar:
     st.header("📌 시스템 메뉴")
+    # key="page_selection"을 사용하여 위에서 초기화한 세션 상태와 연동
     st.radio(
         "이동할 페이지 선택", 
-        ["📊 단일 종목 분석", "🔍 조건 검색기 (스크리너)", "💼 내 계좌 관리 (실전 포트폴리오)", "📓 실전 매매 일지", "📂 관심종목 관리", "📖 주식 & 전략 백과사전"], 
+        [
+            "📊 단일 종목 분석", 
+            "🔍 조건 검색기 (스크리너)", 
+            "💼 내 계좌 관리 (실전 포트폴리오)", 
+            "📓 실전 매매 일지", 
+            "📂 관심종목 관리", 
+            "📖 주식 & 전략 백과사전"
+        ], 
         key="page_selection"
     )
     
     st.divider()
+    
+    # 리스크 관리 대시보드
     st.header("🤖 리스크 관리 통합 시스템")
+    current_regime = check_global_market_regime()
+    regime_display = {
+        "UPTREND": "🇰🇷 코스피: 대세 상승장 (적극 매수)", 
+        "DOWNTREND": "🇰🇷 코스피: 대세 하락장 (신규 매수 금지)", 
+        "SIDEWAYS": "🇰🇷 코스피: 혼조세 (비중 축소)"
+    }.get(current_regime, "알 수 없음")
     
-    kospi_df_global = get_kospi_filter()
-    global_mode = kospi_df_global['Global_Mode'].iloc[-1] if not kospi_df_global.empty else "SIDEWAYS"
-    
-    mode_map = {
-        "UPTREND": "🇰🇷 코스피 종합: 대세 상승장", 
-        "SIDEWAYS": "🇰🇷 코스피 종합: 혼조세 (박스권)", 
-        "DOWNTREND": "🇰🇷 코스피 종합: 대세 하락장 (신규 매수 차단)"
-    }
-    mode_text = mode_map.get(global_mode, "알 수 없음")
-    st.info(f"**{mode_text}**")
+    st.info(f"**{regime_display}**")
     
     st.divider()
-    trading_fee_rate = st.number_input("왕복 수수료+세금 (%)", value=0.2, step=0.05) / 100
-
-# ====== 화면 1: 단일 종목 ======
-if st.session_state.page_selection == "📊 단일 종목 분석":
-    all_names = df_krx['Display'].tolist()
     
-    search_stock = st.selectbox(
-        "🎯 분석할 특정 종목을 고르세요", 
-        options=all_names, 
-        index=all_names.index(st.session_state.current_selection) if st.session_state.current_selection in all_names else 0
-    )
-    
-    if search_stock != st.session_state.current_selection: 
-        st.session_state.current_selection = search_stock
-        st.rerun()
+    # 수수료 설정
+    user_fee = st.number_input("왕복 수수료+세금 (%)", value=0.2, step=0.05) / 100
 
-    stock_info = df_krx[df_krx['Display'] == search_stock].iloc[0]
-    ticker_sym = f"{stock_info['Code']}.KS" if stock_info['Market'] == 'KOSPI' else f"{stock_info['Code']}.KQ"
+# 최종 화면 렌더링 (에러 없이 실행되는 핵심 로직)
+current_page = st.session_state.get('page_selection', "📊 단일 종목 분석")
 
-    df, status, cagr, mdd, win_rate, b_profit, total_score, target_score, current_mode, current_atr, _, rec_weight = analyze_sniper_backtest(ticker_sym, trading_fee_rate)
-    details = get_detailed_info(ticker_sym)
+if current_page == "📊 단일 종목 분석":
+    render_page_stock_detail()
+elif current_page == "🔍 조건 검색기 (스크리너)":
+    render_page_screener()
+elif current_page == "💼 내 계좌 관리 (실전 포트폴리오)":
+    render_page_portfolio()
+elif current_page == "📓 실전 매매 일지":
+    render_page_journal()
+elif current_page == "📂 관심종목 관리":
+    render_page_watchlist()
+elif current_page == "📖 주식 & 전략 백과사전":
+    render_page_manual()
 
-    if df is not None:
-        curr_p = df['Close'].iloc[-1]
-        prev_p = details.get('regularMarketPreviousClose', df['Close'].iloc[-2] if len(df) > 1 else curr_p)
-        
-        diff = curr_p - prev_p
-        rate = ((curr_p - prev_p) / prev_p) * 100 if prev_p > 0 else 0
-        
-        if diff > 0:
-            price_color = "#e03131"
-            arrow_icon = "▲"
-        elif diff < 0:
-            price_color = "#1971c2"
-            arrow_icon = "▼"
-        else:
-            price_color = "#212529"
-            arrow_icon = "-"
-            
-        sl_mult = df['ATR_SL_Mult'].iloc[-1]
-        tp_mult = df['ATR_TP_Mult'].iloc[-1]
-        
-        stop_loss_price = curr_p - (current_atr * sl_mult) if current_atr > 0 else 0
-        take_profit_price = curr_p + (current_atr * tp_mult) if current_atr > 0 else 0
-        
-        mcap = details.get('marketCap', 0)
-        if mcap > 0:
-            mcap_str = f"{int(mcap // 1000000000000)}조 {int((mcap % 1000000000000) // 100000000)}억"
-        else:
-            mcap_str = "N/A"
-            
-        high52 = details.get('fiftyTwoWeekHigh')
-        low52 = details.get('fiftyTwoWeekLow')
-        per = details.get('trailingPE')
-        pbr = details.get('priceToBook')
-        
-        h52_str = f"{high52:,.0f}원" if high52 else "N/A"
-        l52_str = f"{low52:,.0f}원" if low52 else "N/A"
-        per_str = f"{per:.2f}배" if per else "N/A"
-        pbr_str = f"{pbr:.2f}배" if pbr else "N/A"
-        
-        mode_label_map = {
-            "UPTREND": "🚀 상승 추세장", 
-            "SIDEWAYS": "⚖️ 박스 횡보장", 
-            "VOLATILE_UP": "🔥 변동성 장세", 
-            "DOWNTREND": "📉 하락장"
-        }
-        mode_colors = {
-            "UPTREND": "background-color: #e3fafc; color: #0c8599;", 
-            "SIDEWAYS": "background-color: #f3f0ff; color: #6741d9;", 
-            "VOLATILE_UP": "background-color: #fff0f6; color: #a61e4d;", 
-            "DOWNTREND": "background-color: #f8f9fa; color: #495057;"
-        }
-
-        weight_badge_html = f"<span class='weight-badge'>⚖️ 권장 투자 비중: {rec_weight*100:.0f}%</span>" if rec_weight > 0 else ""
-        stop_badge_html = f"<span class='stop-loss-badge'>🛡️ 자동 손절: {stop_loss_price:,.0f}원</span>" if stop_loss_price > 0 else ""
-        profit_badge_html = f"<span class='take-profit-badge'>🚀 자동 익절: {take_profit_price:,.0f}원</span>" if take_profit_price > 0 else ""
-
-        st.markdown(f"""
-<div style='background-color:#ffffff; padding:25px; border-radius:15px; border:2px solid #e9ecef; margin-bottom:20px;'>
-<div style='margin-bottom:15px;'>
-<span class='market-badge' style='{mode_colors.get(current_mode, "")}'>현재 종목 상태: {mode_label_map.get(current_mode, "알 수 없음")}</span>
-{weight_badge_html}
-{stop_badge_html}
-{profit_badge_html}
-</div>
-<div style='display:flex; align-items:baseline; gap:20px;'>
-<span style='font-size:2.2rem; font-weight:bold; color:#343a40;'>{stock_info['Name']}</span>
-<span style='font-size:3.8rem; font-weight:bold; color:{price_color};'>{curr_p:,.0f}원</span>
-<span style='font-size:2rem; font-weight:bold; color:{price_color};'>{arrow_icon} {abs(diff):,.0f} ({rate:+.2f}%)</span>
-</div>
-<div style='margin-top:20px; padding-top:15px; border-top:1px solid #f1f3f5; display:flex; gap:40px; color:#495057;'>
-<div><span style='font-size:0.95rem; color:#868e96;'>시가총액</span><br><b style='font-size:1.1rem;'>{mcap_str}</b></div>
-<div><span style='font-size:0.95rem; color:#868e96;'>52주 최고</span><br><b style='font-size:1.1rem; color:#e03131;'>{h52_str}</b></div>
-<div><span style='font-size:0.95rem; color:#868e96;'>52주 최저</span><br><b style='font-size:1.1rem; color:#1971c2;'>{l52_str}</b></div>
-<div><span style='font-size:0.95rem; color:#868e96;'>PER</span><br><b style='font-size:1.1rem;'>{per_str}</b></div>
-<div><span style='font-size:0.95rem; color:#868e96;'>PBR</span><br><b style='font-size:1.1rem;'>{pbr_str}</b></div>
-</div>
-</div>
-""", unsafe_allow_html=True)
-
-        if "강력 매수" in status:
-            min_entry = curr_p * 0.97
-            max_entry = curr_p * 1.03
-            status_html = f"""
-            <div class="signal-box status-buy" style="font-size:1.4rem;">
-                🔥 강력 매수 (점수: {total_score:.0f}점 / 진입선: {target_score}점)<br>
-                <span style='font-size:1.1rem; color:#f8f9fa; font-weight:normal;'>👉 내일 시가 진입 허용 구간: <b>{min_entry:,.0f}원 ~ {max_entry:,.0f}원</b> (±3% 이내)</span>
-            </div>
-            """
-        elif df['Global_Mode'].iloc[-1] == "DOWNTREND": 
-            status_html = f'<div class="signal-box status-wait" style="font-size:1.5rem;">🇰🇷 종합 하락장 (신규 진입 차단)</div>'
-        elif current_mode == "VOLATILE_UP": 
-            status_html = f'<div class="signal-box status-wait" style="font-size:1.5rem;">🔥 개별 변동성 심화 (진입 제한)</div>'
-        else: 
-            status_class = "status-hold" if "보유자 영역" in status else "status-wait"
-            status_html = f'<div class="signal-box {status_class}" style="font-size:1.5rem;">{status} (점수: {total_score:.0f}점 / 진입선: {target_score}점)</div>'
-            
-        st.markdown(f'<div class="signal-container">{status_html}</div>', unsafe_allow_html=True)
-        st.line_chart(df[['Close', 'MA_S', 'MA_20']], height=450)
-
-        st.divider()
-        col_f, col_b = st.columns([2, 1])
-        f_name = col_f.selectbox("폴더 선택", ["관심종목1", "관심종목2", "관심종목3"], label_visibility="collapsed")
-        
-        if col_b.button("⭐ 현재 종목 추가", use_container_width=True):
-            wl = load_watchlist()
-            if stock_info['Code'] not in wl[f_name]: 
-                wl[f_name].append(stock_info['Code'])
-                save_watchlist(wl)
-                st.toast(f"✅ {stock_info['Name']} 저장 완료!")
-
-# ====== 화면 2: 스캐너 (관심종목 10개 출력) ======
-elif st.session_state.page_selection == "🔍 조건 검색기 (스크리너)":
-    st.title("🔍 실전 타점 스캐너")
-    
-    scan_target = st.radio("검색 대상 선택", ["전체 시장 (순위별 100개)", "⭐ 내 관심종목 전체 스캔"], horizontal=True)
-    
-    if scan_target == "전체 시장 (순위별 100개)":
-        scan_range = st.selectbox("검색 범위", [f"{i*100 + 1}위 ~ {(i+1)*100}위" for i in range(10)])
-    else:
-        scan_range = None
-        st.info("폴더 1, 2, 3에 등록된 모든 관심종목을 한 번에 스캔합니다.")
-    
-    if st.button("🚀 타점 검색 실행", type="primary", use_container_width=True):
-        if scan_target == "전체 시장 (순위별 100개)":
-            start_idx = int(scan_range.split("위")[0].strip()) - 1
-            target_stocks = df_krx.iloc[start_idx:start_idx+100] 
-        else:
-            wl = load_watchlist()
-            all_wl_codes = list(set(wl["관심종목1"] + wl["관심종목2"] + wl["관심종목3"]))
-            target_stocks = df_krx[df_krx['Code'].isin(all_wl_codes)]
-            
-        if target_stocks.empty:
-            st.warning("스캔할 종목이 없습니다. (관심종목이 비어있을 수 있습니다)")
-        else:
-            my_bar = st.progress(0, text=f"{len(target_stocks)}개 종목 스캔 중...")
-            temp_results = []
-            
-            for idx, (i, row) in enumerate(target_stocks.iterrows()):
-                t_code = f"{row['Code']}.KS" if row['Market'] == 'KOSPI' else f"{row['Code']}.KQ"
-                res = analyze_sniper_backtest(t_code, trading_fee_rate)
-                if res[0] is not None: 
-                    temp_results.append({
-                        'Name': row['Name'], 
-                        'Code': row['Code'], 
-                        'Display': row['Display'], 
-                        'Status': res[1], 
-                        'Score': res[6], 
-                        'Weight': round(res[11]*100)
-                    })
-                my_bar.progress((idx + 1) / len(target_stocks))
-                
-            my_bar.empty()
-            st.session_state.search_results = sorted(temp_results, key=lambda x: (0 if "강력" in x['Status'] else 1, -x['Score']))[:10]
-    
-    if st.session_state.search_results:
-        st.subheader("🏆 스캔 결과 (상위 10개)")
-        for item in st.session_state.search_results:
-            c_info, c_btn, c_wl = st.columns([3, 1, 1.5])
-            with c_info: 
-                st.markdown(f"""
-                    <div class='rank-card'>
-                        <b>{item['Name']}</b> ({item['Code']}) <br> 
-                        {item['Status']} | 점수: {item['Score']} | 비중: {item['Weight']}%
-                    </div>
-                """, unsafe_allow_html=True)
-            with c_btn:
-                st.write("")
-                st.button("상세분석", key=f"go_{item['Code']}", on_click=move_to_detail, args=(item['Display'],), use_container_width=True)
-            with c_wl:
-                st.write("")
-                sub_c1, sub_c2 = st.columns([1, 1])
-                with sub_c1: 
-                    wl_folder = st.selectbox("폴더", ["관심종목1", "관심종목2", "관심종목3"], key=f"sel_{item['Code']}", label_visibility="collapsed")
-                with sub_c2:
-                    if st.button("⭐추가", key=f"add_{item['Code']}", use_container_width=True):
-                        wl = load_watchlist()
-                        if item['Code'] not in wl[wl_folder]: 
-                            wl[wl_folder].append(item['Code'])
-                            save_watchlist(wl)
-                            st.toast(f"✅ 저장 완료!")
-
-# ====== 화면 3: 내 계좌 ======
-elif st.session_state.page_selection == "💼 내 계좌 관리 (실전 포트폴리오)":
-    st.title("💼 내 실제 계좌 (포트폴리오) 관리")
-    pf = load_portfolio()
-    
-    with st.expander("➕ 내 계좌에 주식 추가하기", expanded=True):
-        col_s, col_p, col_q, col_b = st.columns([3, 2, 2, 1])
-        add_stock = col_s.selectbox("매수한 종목", options=df_krx['Display'].tolist(), label_visibility="collapsed")
-        buy_price = col_p.number_input("매입 단가 (원)", min_value=1, value=50000, step=100)
-        quantity = col_q.number_input("보유 수량 (주)", min_value=1, value=10, step=1)
-        
-        if col_b.button("저장"):
-            code = add_stock.split("(")[-1].replace(")", "")
-            pf[code] = {
-                "Name": add_stock.split("(")[0].strip(), 
-                "BuyPrice": buy_price, 
-                "Quantity": quantity
-            }
-            save_portfolio(pf)
-            st.rerun()
-            
-    st.divider()
-    if not pf: 
-        st.info("등록된 주식이 없습니다.")
-    else:
-        for code, data in pf.items():
-            t_code = f"{code}.KS" if not df_krx[df_krx['Code']==code].empty and df_krx[df_krx['Code']==code]['Market'].iloc[0] == 'KOSPI' else f"{code}.KQ"
-            res = analyze_sniper_backtest(t_code, trading_fee_rate)
-            
-            if res[0] is not None: 
-                curr_price = res[0]['Close'].iloc[-1]
-                c_atr = res[0]['ATR'].iloc[-1]
-                sl_mult = res[0]['ATR_SL_Mult'].iloc[-1]
-                tp_mult = res[0]['ATR_TP_Mult'].iloc[-1]
-            else: 
-                curr_price = data['BuyPrice']
-                c_atr = 0
-                sl_mult = 1.5
-                tp_mult = 2.5
-                
-            my_sl = (data['BuyPrice'] - (c_atr * sl_mult) if c_atr > 0 else data['BuyPrice'] * 0.95)
-            my_tp = (data['BuyPrice'] + (c_atr * tp_mult) if c_atr > 0 else data['BuyPrice'] * 1.10)
-            
-            profit_amt = (curr_price * data['Quantity']) - (data['BuyPrice'] * data['Quantity'])
-            profit_rate = (profit_amt / (data['BuyPrice'] * data['Quantity'])) * 100
-            
-            if curr_price >= my_tp: 
-                ai_action = "🚀 수익 실현 권장"
-                card_class = "pf-profit"
-                act_color = "#5c940d"
-            elif curr_price <= my_sl: 
-                ai_action = "⚠️ 칼손절 필요"
-                card_class = "pf-loss"
-                act_color = "#e03131"
-            else: 
-                ai_action = "✅ 홀딩 (관망)"
-                card_class = "portfolio-card"
-                act_color = "#2b8a3e"
-                
-            color = "#e03131" if profit_rate > 0 else ("#1971c2" if profit_rate < 0 else "#495057")
-            
-            st.markdown(f"""
-                <div class='portfolio-card {card_class}'>
-                    <div style='display:flex; justify-content:space-between;'>
-                        <div class='pf-title'>{data['Name']}</div>
-                        <div style='color:{act_color}; font-weight:bold;'>{ai_action}</div>
-                    </div>
-                    <div style='display:flex; justify-content:space-between; margin-top:10px;'>
-                        <div class='pf-detail'>매입: {data['BuyPrice']:,.0f}원</div>
-                        <div class='pf-detail'>현재가: {curr_price:,.0f}원</div>
-                        <div class='pf-detail' style='color:{color}; font-weight:bold;'>수익률: {profit_rate:+.2f}% ({profit_amt:+,.0f}원)</div>
-                    </div>
-                    <div style='margin-top:10px; font-size:0.9rem; color:#868e96;'>
-                        목표가: {my_tp:,.0f}원 | 손절가: {my_sl:,.0f}원
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button("목록에서 삭제", key=f"sell_{code}"): 
-                del pf[code]
-                save_portfolio(pf)
-                st.rerun()
-
-# ====== 화면 4: 매매 일지 ======
-elif st.session_state.page_selection == "📓 실전 매매 일지":
-    st.title("📓 포워드 테스팅 (실전 매매 일지)")
-    journal_df = load_journal()
-    
-    edited_df = st.data_editor(
-        journal_df, 
-        num_rows="dynamic", 
-        use_container_width=True, 
-        height=500, 
-        column_config={
-            "시장국면": st.column_config.SelectboxColumn("📈 시장국면", options=["상승장", "횡보장", "하락장"]), 
-            "갭통과": st.column_config.SelectboxColumn("🚪 갭통과", options=["O", "X"]), 
-            "원칙준수": st.column_config.SelectboxColumn("🤖 원칙준수", options=["O", "X"]), 
-            "청산사유": st.column_config.SelectboxColumn("결과", options=["- (보유중)", "목표가 익절", "손절가 손절", "추세 이탈 방어", "뇌동매매"])
-        }
-    )
-    
-    if st.button("💾 일지 파일 저장하기", use_container_width=True, type="primary"): 
-        edited_df.to_csv(JOURNAL_FILE, index=False, encoding='utf-8-sig')
-        st.success("✅ 저장 완료!")
-
-# ====== 화면 5: 관심종목 관리 ======
-elif st.session_state.page_selection == "📂 관심종목 관리":
-    st.title("📂 내 관심종목 관리")
-    wl = load_watchlist()
-    cols = st.columns(3)
-    
-    for i, f_name in enumerate(["관심종목1", "관심종목2", "관심종목3"]):
-        with cols[i]:
-            st.markdown(f"<div class='folder-box'>", unsafe_allow_html=True)
-            st.subheader(f"📁 {f_name}")
-            codes = wl.get(f_name, [])
-            
-            if not codes: 
-                st.info("비어 있습니다.")
-            else:
-                for code in codes:
-                    name_row = df_krx[df_krx['Code'] == code]
-                    name = name_row['Name'].iloc[0] if not name_row.empty else "알수없음"
-                    c_n, c_b = st.columns([4, 1])
-                    
-                    with c_n: 
-                        st.markdown(f"**{name}** ({code})", unsafe_allow_html=True)
-                    with c_b: 
-                        if st.button("❌", key=f"del_{f_name}_{code}"): 
-                            wl[f_name].remove(code)
-                            save_watchlist(wl)
-                            st.rerun()
-            st.markdown("</div>", unsafe_allow_html=True)
-
-# ===== 화면 6: 백과사전 & 실전 매뉴얼 =====
-elif st.session_state.page_selection == "📖 주식 & 전략 백과사전":
-    st.title("📖 Leo의 퀀트 투자 백과사전 & 실전 매뉴얼")
-    
-    tab1, tab2 = st.tabs(["🧠 퀀트 전략 핵심 원리", "📱 키움증권 실전 자동매매 가이드"])
-    
-    with tab1:
-        st.header("1. ⚖️ 포지션 사이징 (자금 관리의 핵심)")
-        st.success("""
-        * **1% 리스크 관리법:** 주가가 요동쳐도, 한 번 손절할 때 전체 계좌의 딱 1%만 잃도록 비중을 조절합니다.
-        * 변동성이 큰 주식은 비중을 적게, 얌전한 주식은 비중을 크게 실어 생존 확률을 극대화합니다.
-        """)
-        st.header("2. 🤖 4국면 스위칭 (Dynamic Regime)")
-        st.warning("""
-        * **🚀 상승장:** 타점 3점 커트라인 / 익절폭 극대화
-        * **⚖️ 횡보장:** 타점 4점 커트라인 / 짧게 단타 (박스권 하단 매수, 상단 매도)
-        * **📉 하락장:** 역배열 방어 최우선
-        * **🔥 변동성장:** 꼬리가 길고 급등락이 심한 경우, 신규 진입 원천 차단
-        """)
-        st.header("3. 🇰🇷 종합 마켓 통합 필터")
-        st.info("* 코스피 시장 전체가 하락장(Downtrend)이면, 숲이 불타고 있다고 판단하여 모든 신규 매수를 원천 차단합니다.")
-        
-    with tab2:
-        st.header("📱 영웅문S# 100% 자동매매 세팅법 (직장인 퀀트 필수)")
-        
-        with st.expander("☀️ 1단계: 살 때 (🚨 지정가 함정 매수법)", expanded=True):
-            st.markdown("""
-            **언제?** 전날 밤 ~ 당일 오전 8시 30분 사이 (출근 전)
-            **목적:** 아침 9시 시가가 '진입 허용 구간' 안에 들어올 때만 기계적으로 매수 (폭락장 뇌동매매 원천 차단)
-            
-            1. **경로:** 앱 하단 [메뉴] ➔ [주식] ➔ [주문] ➔ **[자동감시주문]**
-            2. 상단 탭에서 **[신규종목]** 선택 ➔ **[조건추가]** 클릭 ➔ 스캔한 타겟 종목 검색
-            3. **감시 조건:** '현재가' **`>=` (이상)** 선택 후, 프로그램이 알려준 **[최저가]** 입력 (예: 1,000원)
-            4. **주문 설정 (종류):** 시장가가 아닌 **[보통(지정가)]** 선택 ★★★
-            5. **주문 설정 (가격):** 프로그램이 알려준 **[최고가]** 입력 (예: 1,050원)
-            6. **주문 설정 (수량):** 권장 비중에 맞춰 계산된 주식 수 입력
-            7. **실행:** 유효기간 `1일` 세팅 및 [조건저장] ➔ 밖으로 나가서 반드시 **[▶ 감시시작]** 누르기
-            """)
-            
-        with st.expander("🛡️ 2단계: 팔 때 (스탑로스 완벽 방어막)", expanded=True):
-            st.markdown("""
-            **언제?** 주식이 매수 체결된 것을 확인한 직후 (업무 중 잠깐)
-            **목적:** 장중 폭락(손절)과 급등(익절)에 대비해 인간의 감정을 배제하고 기계적으로 탈출하기
-            
-            1. **경로:** [메뉴] ➔ [주식] ➔ [주문] ➔ **[자동감시주문]**
-            2. 상단 탭에서 **[잔고편입]** 선택 ➔ 방금 체결된 내 주식 클릭
-            3. **감시 조건 (익절):** `[v] 이익실현` 체크 ➔ **`현재가` / `도달 시`** 로 변경 ➔ 프로그램의 **[🚀 목표 익절가]** 입력
-            4. **감시 조건 (손절):** `[v] 손실제한` 체크 ➔ **`현재가` / `도달 시`** 로 변경 ➔ 프로그램의 **[🛡️ 한계 손절가]** 입력 (★가장 중요)
-            5. **주문 설정:** 종류는 무조건 **[시장가]**, 수량은 전량 매도를 위해 **[100% (잔고전량)]** 선택 ★★★
-            6. **실행:** 유효기간 **`90일`** 넉넉히 세팅 후 [조건저장] ➔ 밖으로 나가서 반드시 **[▶ 감시시작]** 누르기
-            """)
+# 하단 정보 표시
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Leo Quant Sniper v4.4 Final Version")
+st.sidebar.caption(f"시스템 최종 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
